@@ -128,7 +128,8 @@ void ccsd_linear_solver(const int ndocc_so, const int nso, Eigen::MatrixXd &Fso,
     double max_d = max_abs_sigma2(sigma2, ndocc_so, nso);
     double max_s = max_abs_sigma1(sigma1, ndocc_so, nso);
 
-    if (max_d < 1e-5 && max_s < 1e-5)
+    if (max_d < 1e-8 && max_s < 1e-8)
+    //if (count > 2)
       break;
   }
 
@@ -301,6 +302,7 @@ TensorRank4 get_sigma2(const int ndocc, const int nso, Eigen::MatrixXd &f, Tenso
     }
   }
 
+
   for (auto a = ndocc; a < nso; a++) {
     for (auto e = ndocc; e < nso; e++) {
 
@@ -435,9 +437,9 @@ TensorRank4 get_sigma2(const int ndocc, const int nso, Eigen::MatrixXd &f, Tenso
   }
 
   for (auto a = ndocc; a < nso; a++) {
-    for (auto b = ndocc; b < nso; b++) {
+    for (auto b = ndocc; b < a; b++) {
       for (auto e = ndocc; e < nso; e++) {
-        for (auto f = ndocc; f < nso; f++) {
+        for (auto f = ndocc; f < e; f++) {
 
           Wuu(a-ndocc,b-ndocc,e-ndocc,f-ndocc) += g(a,e,b,f) - g(a,f,b,e);
 
@@ -460,6 +462,12 @@ TensorRank4 get_sigma2(const int ndocc, const int nso, Eigen::MatrixXd &f, Tenso
             }
           }
           Wuu(a-ndocc,b-ndocc,e-ndocc,f-ndocc) += 0.25*sum;
+
+          Wuu(a-ndocc,b-ndocc,f-ndocc,e-ndocc) = -Wuu(a-ndocc,b-ndocc,e-ndocc,f-ndocc);
+
+          Wuu(b-ndocc,a-ndocc,f-ndocc,e-ndocc) = Wuu(a-ndocc,b-ndocc,e-ndocc,f-ndocc);
+
+          Wuu(b-ndocc,a-ndocc,e-ndocc,f-ndocc) = -Wuu(a-ndocc,b-ndocc,e-ndocc,f-ndocc);
 
         }
       }
@@ -504,7 +512,6 @@ TensorRank4 get_sigma2(const int ndocc, const int nso, Eigen::MatrixXd &f, Tenso
             }
           }
           Wou(m,b-ndocc,e-ndocc,j) += -sum;
-
         }
       }
     }
@@ -512,9 +519,9 @@ TensorRank4 get_sigma2(const int ndocc, const int nso, Eigen::MatrixXd &f, Tenso
 
 
   for (auto i = 0; i < ndocc; i++) {
-    for (auto j = 0; j < ndocc; j++) {
+    for (auto j = 0; j <= i; j++) {
       for (auto a = ndocc; a < nso; a++) {
-        for (auto b = ndocc; b < nso; b++) {
+        for (auto b = ndocc; b <= a; b++) {
 
           //term1
           sigma2(i,a,j,b) += -t2(i,a,j,b)*(f(i,i)+f(j,j)-f(a,a)-f(b,b));
@@ -657,6 +664,9 @@ TensorRank4 get_sigma2(const int ndocc, const int nso, Eigen::MatrixXd &f, Tenso
             sum += t1(m,b-ndocc)*(g(m,i,a,j)-g(m,j,a,i));
           }
           sigma2(i,a,j,b) += sum;
+          sigma2(i,b,j,a) = -sigma2(i,a,j,b);
+          sigma2(j,a,i,b) = -sigma2(i,a,j,b);
+          sigma2(j,b,i,a) = sigma2(i,a,j,b);
 
         }
       }
@@ -851,11 +861,11 @@ double triples_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eigen:
   double E_T = 0.0;
 
   for (auto i = 0; i < ndocc; i++) {
-    for (auto j = 0; j < ndocc; j++) {
-      for (auto k = 0; k < ndocc; k++) {
+    for (auto j = 0; j <= i; j++) {
+      for (auto k = 0; k <= j; k++) {
         for (auto a = ndocc; a < nso; a++) {
-          for (auto b = ndocc; b < nso; b++) {
-            for (auto c = ndocc; c < nso; c++) {
+          for (auto b = ndocc; b <= a; b++) {
+            for (auto c = ndocc; c <= b; c++) {
               double dijkabc = f(i,i) + f(j,j) + f(k,k) - f(a,a) - f(b,b) - f(c,c);
 
               double tijkabc_d = t1(i,a-ndocc)*(g(j,b,k,c)-g(j,c,k,b)) - t1(j,a-ndocc)*(g(i,b,k,c)-g(i,c,k,b))
@@ -884,7 +894,7 @@ double triples_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eigen:
 
               double tijkabc_c = sum1 - sum2;
 
-              E_T += 1/36.0*tijkabc_c*(tijkabc_c + tijkabc_d)/dijkabc;
+              E_T += tijkabc_c*(tijkabc_c + tijkabc_d)/dijkabc;
             }
           }
         }
@@ -937,11 +947,11 @@ double lt_triples_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eig
 
       double E_T = 0.0;
       for (auto i = 0; i < ndocc; i++) {
-        for (auto j = 0; j < ndocc; j++) {
-          for (auto k = 0; k < ndocc; k++) {
+        for (auto j = 0; j <= i; j++) {
+          for (auto k = 0; k <= j; k++) {
             for (auto a = ndocc; a < nso; a++) {
-              for (auto b = ndocc; b < nso; b++) {
-                for (auto c = ndocc; c < nso; c++) {
+              for (auto b = ndocc; b <= a; b++) {
+                for (auto c = ndocc; c <= b; c++) {
                   double dijkabc = f(i,i) + f(j,j) + f(k,k) - f(a,a) - f(b,b) - f(c,c);
 
                   double tijkabc_d = t1(i,a-ndocc)*(g(j,b,k,c)-g(j,c,k,b)) - t1(j,a-ndocc)*(g(i,b,k,c)-g(i,c,k,b))
@@ -971,7 +981,7 @@ double lt_triples_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eig
                   double tijkabc_c = sum1 - sum2;
 
                   double D = (f(a,a)+f(b,b)+f(c,c)-f(i,i)-f(j,j)-f(k,k));
-                  double integral = 1/36.0*tijkabc_c*(tijkabc_c + tijkabc_d);
+                  double integral = tijkabc_c*(tijkabc_c + tijkabc_d);
                   double exponent = D/alpha - 1.0;
 
                   double denominator = 0.0;
