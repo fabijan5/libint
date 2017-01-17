@@ -17,6 +17,9 @@
 //include mp2 specific header file
 #include "mp2.h"
 
+//include ccsd specific header file
+#include "ccsd.h"
+
 typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
         Matrix;  // import dense, dynamically sized Matrix type from Eigen;
                  // this is a matrix with row-major storage (http://en.wikipedia.org/wiki/Row-major_order)
@@ -111,6 +114,7 @@ double compute_energy(const int nbasis, Eigen::MatrixXd &P, const Eigen::MatrixX
 Eigen::MatrixXd hartree_fock(const double enuc, const int nbasis, const int ndocc, const Eigen::MatrixXd &S,
                              const Eigen::MatrixXd &H_core, const TensorRank4 &g, Eigen::VectorXd &E_orb) {
 
+  const auto start_total = std::chrono::high_resolution_clock::now();
   //perform symmetric orthogonalization
   Eigen::MatrixXd X = symmetric_orthogonalization(S);
   Eigen::MatrixXd C;
@@ -125,6 +129,7 @@ Eigen::MatrixXd hartree_fock(const double enuc, const int nbasis, const int ndoc
   printf(" Hartree-Fock Energy\n");
   while (norm > threshold) {
 
+    const auto start_it = std::chrono::high_resolution_clock::now();
     count++;
     Eigen::MatrixXd F(nbasis, nbasis);
     F = fock_build(nbasis, P_guess, H_core, g);
@@ -143,11 +148,17 @@ Eigen::MatrixXd hartree_fock(const double enuc, const int nbasis, const int ndoc
     P_guess = 0.2*P_guess+0.8*P;
     E_electronic = compute_energy(nbasis, P, H_core, F);
 
+    const auto stop_it = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double> time_elapsed_it = stop_it - start_it;
+
     if (count == 1) {
-    printf(" Iter         E_total            norm\n");}
-    printf("  %02d %20.12f %20.12e\n", count, E_electronic + enuc, norm);
+    printf(" Iter         E_total              norm        time per iteration/sec \n");}
+    printf("  %02d %20.12f %20.12e    %10.5lf\n", count, E_electronic + enuc, norm, time_elapsed_it.count());
   }
 
+  const auto stop_total = std::chrono::high_resolution_clock::now();
+  const std::chrono::duration<double> time_elapsed_total = stop_total - start_total;
+  printf("Total time for Hartree-Fock module: %10.5lf sec\n", time_elapsed_total.count());
   return C;
 }
 
@@ -224,14 +235,16 @@ int main(int argc, char *argv[]) {
   TensorRank4 g = compute_2body_ints(shells);
   Eigen::VectorXd E_orb;
 
+
   Eigen::MatrixXd C = hartree_fock(enuc, nao, ndocc, S, H_core, g, E_orb);
+
   TensorRank4 g_mo = ao_to_mo_integral_transform(nao, ndocc, C, g);
 
   double E_MP2 = mp2_energy(nao, ndocc, E_orb, g_mo);
-  printf("\n");
-  printf("E_MP2 = %20.12f\n", E_MP2);
 
   lt_mp2_energy(nao, ndocc, E_orb, g_mo, E_MP2);
+
+  double E_CCSD = ccsd_energy(nao, ndocc, E_orb, g_mo);
 
 return 0;
 }

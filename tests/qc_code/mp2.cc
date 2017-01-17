@@ -21,8 +21,10 @@ typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
 TensorRank4 ao_to_mo_integral_transform(const int nbasis, const int ndocc, const Eigen::MatrixXd &C,
     const TensorRank4 &g) {
 
+  const auto start_total = std::chrono::high_resolution_clock::now();
+
   TensorRank4 g1(nbasis,nbasis,nbasis,nbasis);
-  for (auto s = ndocc; s < nbasis; s++) {
+  for (auto s = 0; s < nbasis; s++) {
     for (auto mu = 0; mu < nbasis; mu++) {
       for (auto nu = 0; nu < nbasis; nu++) {
         for (auto rho = 0; rho < nbasis; rho++) {
@@ -37,8 +39,8 @@ TensorRank4 ao_to_mo_integral_transform(const int nbasis, const int ndocc, const
   }
 
   TensorRank4 g2(nbasis,nbasis,nbasis,nbasis);
-  for (auto s = ndocc; s < nbasis; s++) {
-    for (auto r = 0; r < ndocc; r++) {
+  for (auto s = 0; s < nbasis; s++) {
+    for (auto r = 0; r < nbasis; r++) {
       for (auto mu = 0; mu < nbasis; mu++) {
         for (auto nu = 0; nu < nbasis; nu++) {
           double integral = 0.0;
@@ -52,9 +54,9 @@ TensorRank4 ao_to_mo_integral_transform(const int nbasis, const int ndocc, const
   }
 
   TensorRank4 g3(nbasis,nbasis,nbasis,nbasis);
-  for (auto s = ndocc; s < nbasis; s++) {
-    for (auto r = 0; r < ndocc; r++) {
-      for (auto q = ndocc; q < nbasis; q++) {
+  for (auto s = 0; s < nbasis; s++) {
+    for (auto r = 0; r < nbasis; r++) {
+      for (auto q = 0; q < nbasis; q++) {
         for (auto mu = 0; mu < nbasis; mu++) {
           double integral = 0.0;
           for (auto nu = 0; nu < nbasis; nu++) {
@@ -68,10 +70,10 @@ TensorRank4 ao_to_mo_integral_transform(const int nbasis, const int ndocc, const
 
 
   TensorRank4 g_mo(nbasis,nbasis,nbasis,nbasis);
-  for (auto s = ndocc; s < nbasis; s++) {
-    for (auto r = 0; r < ndocc; r++) {
-      for (auto q = ndocc; q < nbasis; q++) {
-        for (auto p = 0; p < ndocc; p++) {
+  for (auto s = 0; s < nbasis; s++) {
+    for (auto r = 0; r < nbasis; r++) {
+      for (auto q = 0; q < nbasis; q++) {
+        for (auto p = 0; p < nbasis; p++) {
           double integral = 0.0;
           for (auto mu = 0; mu < nbasis; mu++) {
             integral += C(mu,p)*g3(mu,q,r,s);
@@ -82,11 +84,17 @@ TensorRank4 ao_to_mo_integral_transform(const int nbasis, const int ndocc, const
     }
   }
 
+  const auto stop_total = std::chrono::high_resolution_clock::now();
+  const std::chrono::duration<double> time_elapsed_total = stop_total - start_total;
+  printf("Total time for 2e-integrals transformation module: %10.5lf sec\n", time_elapsed_total.count());
+
   return g_mo;
 }
 
 
 double mp2_energy(const int nbasis, const int ndocc, Eigen::VectorXd &E_orb, TensorRank4 &g) {
+
+  const auto start_total = std::chrono::high_resolution_clock::now();
 
   double E_MP2 = 0.0;
 
@@ -99,6 +107,13 @@ double mp2_energy(const int nbasis, const int ndocc, Eigen::VectorXd &E_orb, Ten
       }
     }
   }
+
+  printf("\n");
+  printf("E_MP2 = %20.12f\n", E_MP2);
+
+  const auto stop_total = std::chrono::high_resolution_clock::now();
+  const std::chrono::duration<double> time_elapsed_total = stop_total - start_total;
+  printf("Total time for MP2 energy evaluation module: %10.5lf sec\n", time_elapsed_total.count());
 
   return E_MP2;
 }
@@ -129,44 +144,45 @@ void gauss_quadrature(int N, double a, double b, Eigen::VectorXd &w, Eigen::Vect
 
 void lt_mp2_energy(const int nbasis, const int ndocc, Eigen::VectorXd E_orb, TensorRank4 &g, double E_MP2_can) {
 
-  double E_MP2_lt = 0.0;
-  int N = 4;
-  //Eigen::VectorXd w(N);
-  //Eigen::VectorXd x(N);
-
-  //gauss_quadrature(N, 0, 1, w, x);
 
   double alpha = 2.0*E_orb(ndocc) - 2.0*E_orb(ndocc-1);
   printf(" \n");
   printf(" Laplace-Transform MP2: \n");
   for (auto n = 2; n <= 32; n+=2) {
+
+    const auto start_n = std::chrono::high_resolution_clock::now();
     Eigen::VectorXd w(n);
     Eigen::VectorXd x(n);
     gauss_quadrature(n, 0, 1, w, x);
 
-  double E_MP2 = 0.0;
-  for (auto i = 0; i < ndocc; i++) {
-    for (auto j = 0; j < ndocc; j++) {
-      for (auto a = ndocc; a < nbasis; a++) {
-        for (auto b = ndocc; b < nbasis; b++) {
+    double E_MP2 = 0.0;
+    for (auto i = 0; i < ndocc; i++) {
+      for (auto j = 0; j < ndocc; j++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          for (auto b = ndocc; b < nbasis; b++) {
 
-          double D = (E_orb(a)+E_orb(b)-E_orb(i)-E_orb(j));
-          double integral = g(i,a,j,b)*(2.0*g(i,a,j,b) - 1.0*g(i,b,j,a));
-          double exponent = D/alpha - 1.0;
+            double D = (E_orb(a)+E_orb(b)-E_orb(i)-E_orb(j));
+            double integral = g(i,a,j,b)*(2.0*g(i,a,j,b) - 1.0*g(i,b,j,a));
+            double exponent = D/alpha - 1.0;
 
-          double denominator = 0.0;
-          for (auto k = 0; k < n; k++) {
-            denominator += w(k)*pow(x(k),exponent);
+            double denominator = 0.0;
+            for (auto k = 0; k < n; k++) {
+              denominator += w(k)*pow(x(k),exponent);
+            }
+            E_MP2 += integral*denominator;
           }
-          E_MP2 += integral*denominator;
         }
       }
     }
-  }
-  E_MP2 = -E_MP2/alpha;
-  if (n == 2) {
-    printf(" Number of segments         LT_MP2            error(LT_MP2 - MP2_canonical)/microHatree\n");}
-    printf("         %02d       %20.12f            %20.12f\n", n, E_MP2, (E_MP2 - E_MP2_can)*1e6);
+
+    E_MP2 = -E_MP2/alpha;
+
+    const auto stop_n = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double> time_elapsed_n = stop_n - start_n;
+
+    if (n == 2) {
+      printf(" Number of segments         LT_MP2        error/microHartree  time for n/sec\n");}
+    printf("         %02d       %20.12f %20.12f   %10.5lf\n", n, E_MP2, (E_MP2 - E_MP2_can)*1e6, time_elapsed_n.count());
   }
 }
 

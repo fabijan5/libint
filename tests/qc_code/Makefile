@@ -33,7 +33,10 @@ check1:: $(TEST1)
 mp2.o: mp2.cc
 	g++ -c -I /usr/local/include/eigen3 $^ -std=c++11
 
-$(TEST1): $(CXXTEST1OBJ) mp2.o $(COMPILER_LIB) $(COMPUTE_LIB)
+ccsd.o: ccsd.cc
+	g++ -c -I /usr/local/include/eigen3 $^ -std=c++11
+
+$(TEST1): $(CXXTEST1OBJ) mp2.o ccsd.o $(COMPILER_LIB) $(COMPUTE_LIB)
 	g++ $^ -o $@
 #	$(LD) $^ -o $@ $(LDFLAGS) $^ $(SYSLIBS)
 
