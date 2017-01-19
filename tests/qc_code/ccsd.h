@@ -25,3 +25,15 @@ double triples_energy(const int ndocc_so, const int nso, Eigen::MatrixXd &Fso, E
 
 double lt_triples_energy(const int ndocc_so, const int nso, Eigen::MatrixXd &Fso, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g_so, double E_T_can);
 
+void ccsd_linear_solver_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &F, TensorRank4 &g, TensorRank4 &t2);
+
+TensorRank4 get_sigma2_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &f, TensorRank4 &g, Eigen::MatrixXd &t1, TensorRank4 &t2);
+
+Eigen::MatrixXd get_sigma1_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &F, TensorRank4 &g, Eigen::MatrixXd &t1, TensorRank4 &t2);
+
+double get_ccsd_energy_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &f, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g);
+
+Eigen::MatrixXd get_sigma1_closed_shell_ta(const int ndocc, const int nbasis, Eigen::MatrixXd &F, TensorRank4 &g, Eigen::MatrixXd &t1, TensorRank4 &t2);
+
+TensorRank4 get_sigma2_closed_shell_ta(const int ndocc, const int nbasis, Eigen::MatrixXd &f, TensorRank4 &g, Eigen::MatrixXd &t1, TensorRank4 &t2);
+

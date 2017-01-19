@@ -65,20 +65,32 @@ double ccsd_energy(const int nbasis, const int ndocc, Eigen::VectorXd &E_orb, Te
   }
 
   double E_MP2_SO = 0.0;
-  TensorRank4 t2(nso,nso,nso,nso);
+  TensorRank4 t2_so(nso,nso,nso,nso);
 
   for (auto i = 0; i < ndocc_so; i++) {
     for (auto j = 0; j < ndocc_so; j++) {
       for (auto a = ndocc_so; a < nso; a++) {
         for (auto b = ndocc_so; b < nso; b++) {
           double dijab = Fso(i,i)+Fso(j,j)-Fso(a,a)-Fso(b,b);
-          t2(i,a,j,b) = (g_so(i,a,j,b) - g_so(i,b,j,a))/dijab;
-          E_MP2_SO += 0.25*(g_so(i,a,j,b) - g_so(i,b,j,a))*t2(i,a,j,b);
+          t2_so(i,a,j,b) = (g_so(i,a,j,b) - g_so(i,b,j,a))/dijab;
+          E_MP2_SO += 0.25*(g_so(i,a,j,b) - g_so(i,b,j,a))*t2_so(i,a,j,b);
         }
       }
     }
   }
 
+  TensorRank4 t2(nbasis,nbasis,nbasis,nbasis);
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          double dijab = F(i,i)+F(j,j)-F(a,a)-F(b,b);
+          t2(i,a,j,b) = g(i,a,j,b)/dijab;
+        }
+      }
+    }
+  }
   printf("\n");
   printf("E_MP2_SO = %20.12f\n", E_MP2_SO);
 
@@ -86,7 +98,8 @@ double ccsd_energy(const int nbasis, const int ndocc, Eigen::VectorXd &E_orb, Te
   const std::chrono::duration<double> time_elapsed_total = stop_total - start_total;
   printf("Total time for MP2 spin-orbital energy evaluation module: %10.5lf sec\n", time_elapsed_total.count());
 
-  ccsd_linear_solver(ndocc_so, nso, Fso, g_so, t2);
+  //ccsd_linear_solver(ndocc_so, nso, Fso, g_so, t2_so);
+  ccsd_linear_solver_closed_shell(ndocc, nbasis, F, g, t2);
 
   return E_MP2_SO;
 }
@@ -129,7 +142,7 @@ void ccsd_linear_solver(const int ndocc_so, const int nso, Eigen::MatrixXd &Fso,
     double max_s = max_abs_sigma1(sigma1, ndocc_so, nso);
 
     if (max_d < 1e-8 && max_s < 1e-8)
-    //if (count > 2)
+    //if (count > 4)
       break;
   }
 
@@ -146,6 +159,65 @@ void ccsd_linear_solver(const int ndocc_so, const int nso, Eigen::MatrixXd &Fso,
   printf("Total time for computation of (T): %10.5lf sec\n", time_elapsed.count());
 
   double E_T_lt = lt_triples_energy(ndocc_so, nso, Fso, t1, t2, g_so, E_T);
+
+}
+
+void ccsd_linear_solver_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &F, TensorRank4 &g, TensorRank4 &t2) {
+
+
+  double E_CCSD = 0.0;
+  Eigen::MatrixXd t1(ndocc, nbasis-ndocc);
+  t1 = Eigen::MatrixXd::Zero(ndocc, nbasis-ndocc);
+
+  int count = 0;
+
+ while (true) {
+
+    const auto start_it = std::chrono::high_resolution_clock::now();
+    count++;
+
+    TensorRank4 sigma2 = get_sigma2_closed_shell_ta(ndocc, nbasis, F, g, t1, t2);
+
+    Eigen::MatrixXd sigma1 = get_sigma1_closed_shell_ta(ndocc, nbasis, F, g, t1, t2);
+
+    TensorRank4 dt2 = get_double_amplitude_increment(sigma2, F, ndocc, nbasis);
+
+    Eigen::MatrixXd dt1 = get_single_amplitude_increment(sigma1, F, ndocc, nbasis);
+
+    t2 = update_double_amplitudes(t2, dt2, ndocc, nbasis);
+
+    t1 = update_single_amplitudes(t1, dt1, ndocc, nbasis);
+
+    E_CCSD = get_ccsd_energy_closed_shell(ndocc, nbasis, F, t1, t2, g);
+    const auto stop_it = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double> time_elapsed_it = stop_it - start_it;
+
+    if (count == 1) {
+      printf(" Iter          E_CCSD     time per iteration/sec \n");}
+    printf("  %02d %20.12f     %10.5lf\n", count, E_CCSD, time_elapsed_it.count());
+
+    double max_d = max_abs_sigma2(sigma2, ndocc, nbasis);
+    double max_s = max_abs_sigma1(sigma1, ndocc, nbasis);
+
+    if (max_d < 1e-8 && max_s < 1e-8)
+    //if (count > 4)
+      break;
+  }
+
+
+  printf("E_CCSD = %20.12f\n", E_CCSD);
+/*
+  const auto start = std::chrono::high_resolution_clock::now();
+
+  double E_T = triples_energy(ndocc_so, nso, Fso, t1, t2, g_so);
+
+  const auto stop = std::chrono::high_resolution_clock::now();
+  const std::chrono::duration<double> time_elapsed = stop - start;
+
+  printf("E_(T)  = %20.12f\n", E_T);
+  printf("Total time for computation of (T): %10.5lf sec\n", time_elapsed.count());
+
+  double E_T_lt = lt_triples_energy(ndocc_so, nso, Fso, t1, t2, g_so, E_T);*/
 
 }
 
@@ -194,6 +266,24 @@ double get_ccsd_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eigen
 
   return E_CCSD;
 }
+
+double get_ccsd_energy_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &f, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g) {
+
+  double E_CCSD = 0.0;
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          E_CCSD += 2.0*f(i,a)*t1(i,a-ndocc) + (2.0*g(i,a,j,b)-g(i,b,j,a))*(t2(i,a,j,b) + t1(i,a-ndocc)*t1(j,b-ndocc));
+        }
+      }
+    }
+  }
+
+  return E_CCSD;
+}
+
 TensorRank4 update_double_amplitudes(TensorRank4 &t2, TensorRank4 &dt2, const int ndocc, const int nso) {
 
   for (auto i = 0; i < ndocc; i++) {
@@ -854,6 +944,1094 @@ Eigen::MatrixXd get_sigma1(const int ndocc, const int nso, Eigen::MatrixXd &f, T
   }
 
   return sigma1;
+}
+
+TensorRank4 get_sigma2_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &f, TensorRank4 &g, Eigen::MatrixXd &t1, TensorRank4 &t2) {
+
+  TensorRank4 sigma2(nbasis,nbasis,nbasis,nbasis);
+
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          sigma2(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  Eigen::MatrixXd huu(nbasis-ndocc,nbasis-ndocc);
+  huu = Eigen::MatrixXd::Zero(nbasis-ndocc,nbasis-ndocc);
+
+  Eigen::MatrixXd hoo(ndocc,ndocc);
+  hoo = Eigen::MatrixXd::Zero(ndocc,ndocc);
+
+  Eigen::MatrixXd guu(nbasis-ndocc,nbasis-ndocc);
+  guu = Eigen::MatrixXd::Zero(nbasis-ndocc,nbasis-ndocc);
+
+  Eigen::MatrixXd goo(ndocc,ndocc);
+  goo = Eigen::MatrixXd::Zero(ndocc,ndocc);
+
+  TensorRank4 aa(nbasis,nbasis,nbasis,nbasis);
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          aa(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  TensorRank4 bb(nbasis,nbasis,nbasis,nbasis);
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          bb(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  TensorRank4 jj(nbasis,nbasis,nbasis,nbasis);
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          jj(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  TensorRank4 kk(nbasis,nbasis,nbasis,nbasis);
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          kk(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  TensorRank4 T(nbasis,nbasis,nbasis,nbasis);
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          T(i,a,j,b) = 0.5*t2(i,a,j,b) + t1(i,a-ndocc)*t1(j,b-ndocc);
+        }
+      }
+    }
+  }
+
+  TensorRank4 tau(nbasis,nbasis,nbasis,nbasis);
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          tau(i,a,j,b) = t2(i,a,j,b) + t1(i,a-ndocc)*t1(j,b-ndocc);
+        }
+      }
+    }
+  }
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto k = 0; k < ndocc; k++) {
+      hoo(i,k) += f(i,k);
+
+      double sum = 0.0;
+      for (auto j = 0; j < ndocc; j++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          for (auto b = ndocc; b < nbasis; b++) {
+
+            sum += (2.0*g(i,a,j,b) - g(i,b,j,a))*tau(k,a,j,b);
+          }
+        }
+      }
+      hoo(i,k) += sum;
+    }
+  }
+
+  for (auto c = ndocc; c < nbasis; c++) {
+    for (auto a = ndocc; a < nbasis; a++) {
+      huu(c-ndocc,a-ndocc) += f(c,a);
+
+      double sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        for (auto j = 0; j < ndocc; j++) {
+          for (auto b = ndocc; b < nbasis; b++) {
+            sum += (2.0*g(i,a,j,b) - g(j,a,i,b))*tau(i,c,j,b);
+          }
+        }
+      }
+      huu(c-ndocc,a-ndocc) += -sum;
+    }
+  }
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto k = 0; k < ndocc; k++) {
+      goo(i,k) += hoo(i,k);
+
+      double sum = 0.0;
+      for (auto a = ndocc; a < nbasis; a++) {
+        sum += f(i,a)*t1(k,a-ndocc);
+      }
+      goo(i,k) += sum;
+
+      sum = 0.0;
+      for (auto j = 0; j < ndocc; j++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          sum += (2.0*g(i,k,j,a)-g(j,k,i,a))*t1(j,a-ndocc);
+        }
+      }
+      goo(i,k) += sum;
+    }
+  }
+
+  for (auto c = ndocc; c < nbasis; c++) {
+    for (auto a = ndocc; a < nbasis; a++) {
+
+      guu(c-ndocc,a-ndocc) += huu(c-ndocc,a-ndocc);
+
+      double sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        sum += f(i,a)*t1(i,c-ndocc);
+      }
+      guu(c-ndocc,a-ndocc) += -sum;
+
+      sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          sum += (2.0*g(c,a,i,b)-g(c,b,i,a))*t1(i,b-ndocc);
+        }
+      }
+      guu(c-ndocc,a-ndocc) += sum;
+    }
+  }
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto k = 0; k < ndocc; k++) {
+      for (auto j = 0; j < ndocc; j++) {
+        for (auto l = 0; l < ndocc; l++) {
+          aa(i,k,j,l) += g(i,k,j,l);
+
+          double sum = 0.0;
+          for (auto a = ndocc; a < nbasis; a++) {
+            sum += g(i,k,j,a)*t1(l,a-ndocc) + g(i,a,j,l)*t1(k,a-ndocc);
+          }
+          aa(i,k,j,l) += sum;
+
+          sum = 0.0;
+          for (auto a = ndocc; a < nbasis; a++) {
+            for (auto b = ndocc; b < nbasis; b++) {
+              sum += g(i,a,j,b)*tau(k,a,l,b);
+            }
+          }
+          aa(i,k,j,l) += sum;
+
+        }
+      }
+    }
+  }
+
+  for (auto c = ndocc; c < nbasis; c++) {
+    for (auto a = ndocc; a < nbasis; a++) {
+      for (auto d = ndocc; d < nbasis; d++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+
+          bb(c,a,d,b) += g(c,a,d,b);
+
+          double sum = 0.0;
+          for (auto i = 0; i < ndocc; i++) {
+            sum += g(c,a,i,b)*t1(i,d-ndocc) + g(i,a,d,b)*t1(i,c-ndocc);
+          }
+          bb(c,a,d,b) += -sum;
+        }
+      }
+    }
+  }
+
+  for (auto c = ndocc; c < nbasis; c++) {
+    for (auto k = 0; k < ndocc; k++) {
+      for (auto i = 0; i < ndocc; i++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+
+          jj(c,k,i,a) += g(c,k,i,a);
+
+          double sum = 0.0;
+          for (auto j = 0; j < ndocc; j++) {
+            sum += g(j,k,i,a)*t1(j,c-ndocc);
+          }
+          jj(c,k,i,a) += -sum;
+
+          sum = 0.0;
+          for (auto b = ndocc; b < nbasis; b++) {
+            sum += g(c,b,i,a)*t1(k,b-ndocc);
+          }
+          jj(c,k,i,a) += sum;
+
+          sum = 0.0;
+          for (auto j = 0; j < ndocc; j++) {
+            for (auto b = ndocc; b < nbasis; b++) {
+              sum += g(i,a,j,b)*T(k,b,j,c);
+            }
+          }
+          jj(c,k,i,a) += -sum;
+
+          sum = 0.0;
+          for (auto j = 0; j < ndocc; j++) {
+            for (auto b = ndocc; b < nbasis; b++) {
+              sum += 0.5*(2.0*g(i,a,j,b) - g(i,b,j,a))*t2(k,c,j,b);
+            }
+          }
+          jj(c,k,i,a) += sum;
+
+        }
+      }
+    }
+  }
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto k = 0; k < ndocc; k++) {
+      for (auto c = ndocc; c < nbasis; c++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+
+          kk(i,k,c,a) += g(i,k,c,a);
+
+          double sum = 0.0;
+          for (auto j = 0; j < ndocc; j++) {
+            sum += g(i,k,j,a)*t1(j,c-ndocc);
+          }
+          kk(i,k,c,a) += -sum;
+
+          sum = 0.0;
+          for (auto b = ndocc; b < nbasis; b++) {
+            sum += g(i,b,c,a)*t1(k,b-ndocc);
+          }
+          kk(i,k,c,a) += sum;
+
+          sum = 0.0;
+          for (auto j = 0; j < ndocc; j++) {
+            for (auto b = ndocc; b < nbasis; b++) {
+              sum += g(i,b,j,a)*T(k,b,j,c);
+            }
+          }
+          kk(i,k,c,a) += -sum;
+
+        }
+      }
+    }
+  }
+
+  for (auto c = ndocc; c < nbasis; c++) {
+    for (auto k = 0; k < ndocc; k++) {
+      for (auto d = ndocc; d < nbasis; d++) {
+        for (auto l = 0; l < ndocc; l++) {
+
+          //term1
+          sigma2(k,c,l,d) += g(c,k,d,l);
+
+          //term2
+          double sum = 0.0;
+          for (auto i = 0; i < ndocc; i++) {
+            for (auto j = 0; j < ndocc; j++) {
+              sum += aa(i,k,j,l)*tau(i,c,j,d);
+            }
+          }
+          sigma2(k,c,l,d) += sum;
+
+          //term3
+          sum = 0.0;
+          for (auto a = ndocc; a < nbasis; a++) {
+            for (auto b = ndocc; b < nbasis; b++) {
+              sum += bb(c,a,d,b)*tau(k,a,l,b);
+            }
+          }
+          sigma2(k,c,l,d) += sum;
+
+          //term4
+          sum = 0.0;
+          for (auto a = ndocc; a < nbasis; a++) {
+            sum += guu(c-ndocc,a-ndocc)*t2(k,a,l,d)
+                + guu(d-ndocc,a-ndocc)*t2(l,a,k,c);
+          }
+          sigma2(k,c,l,d) += sum;
+
+          //term5
+          sum = 0.0;
+          for (auto i = 0; i < ndocc; i++) {
+            sum += goo(i,k)*t2(i,c,l,d) + goo(i,l)*t2(i,d,k,c);
+          }
+          sigma2(k,c,l,d) += -sum;
+
+          //term6 1
+          sum = 0.0;
+          for (auto i = 0; i < ndocc; i++) {
+            for (auto a = ndocc; a < nbasis; a++) {
+              sum += (g(c,k,d,a)-g(i,k,d,a)*t1(i,c-ndocc))*t1(l,a-ndocc)
+                  + (g(d,l,c,a)-g(i,l,c,a)*t1(i,d-ndocc))*t1(k,a-ndocc);
+            }
+          }
+          sigma2(k,c,l,d) += sum;
+
+          sum = 0.0;
+
+          for (auto a = ndocc; a < nbasis; a++) {
+            double sum1 = 0.0;
+            double sum2 = 0.0;
+            for (auto i = 0; i < ndocc; i++) {
+              sum1 += g(i,k,d,a)*t1(i,c-ndocc);
+              sum2 += g(i,l,c,a)*t1(i,d-ndocc);
+            }
+            sum += (g(c,k,d,a)-sum1)*t1(l,a-ndocc) + (g(d,l,c,a)-sum2)*t1(k,a-ndocc);
+          }
+          sigma2(k,c,l,d) += sum;
+
+          //term7
+          sum = 0.0;
+          for (auto i = 0; i < ndocc; i++) {
+            double sum1 = 0.0;
+            double sum2 = 0.0;
+            for (auto a = ndocc; a < nbasis; a++) {
+              sum1 += g(c,k,i,a)*t1(l,a-ndocc);
+              sum2 += g(d,l,i,a)*t1(k,a-ndocc);
+            }
+            sum += (g(c,k,i,l) + sum1)*t1(i,d-ndocc) + (g(d,l,i,k) + sum2)*t1(i,c-ndocc);
+          }
+          sigma2(k,c,l,d) += -sum;
+
+          //term8
+          sum = 0.0;
+          for (auto i = 0; i < ndocc; i++) {
+            for (auto a = ndocc; a < nbasis; a++) {
+              sum += 0.5*(2.0*jj(c,k,i,a)-kk(i,k,c,a))*(2.0*t2(i,a,l,d)-t2(i,d,l,a))
+                  + 0.5*(2.0*jj(d,l,i,a)-kk(i,l,d,a))*(2.0*t2(i,a,k,c)-t2(i,c,k,a));
+            }
+          }
+          sigma2(k,c,l,d) += sum;
+
+          //term9
+          sum = 0.0;
+          for (auto i = 0; i < ndocc; i++) {
+            for (auto a = ndocc; a < nbasis; a++) {
+              sum += 0.5*kk(i,k,c,a)*t2(i,d,l,a) + 0.5*kk(i,l,d,a)*t2(i,c,k,a);
+            }
+          }
+          sigma2(k,c,l,d) += -sum;
+
+          //term10
+          sum = 0.0;
+          for (auto i = 0; i < ndocc; i++) {
+            for (auto a = ndocc; a < nbasis; a++) {
+              sum += kk(i,k,d,a)*t2(i,c,l,a) + kk(i,l,c,a)*t2(i,d,k,a);
+            }
+          }
+
+          sigma2(k,c,l,d) += -sum;
+
+        }
+      }
+    }
+  }
+
+  return sigma2;
+}
+
+Eigen::MatrixXd get_sigma1_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &f, TensorRank4 &g, Eigen::MatrixXd &t1, TensorRank4 &t2) {
+
+  Eigen::MatrixXd sigma1(nbasis,nbasis);
+  sigma1 = Eigen::MatrixXd::Zero(nbasis,nbasis);
+
+  Eigen::MatrixXd huu(nbasis-ndocc,nbasis-ndocc);
+  huu = Eigen::MatrixXd::Zero(nbasis-ndocc,nbasis-ndocc);
+
+  Eigen::MatrixXd hoo(ndocc,ndocc);
+  hoo = Eigen::MatrixXd::Zero(ndocc,ndocc);
+
+  Eigen::MatrixXd hou(ndocc,nbasis-ndocc);
+  hou = Eigen::MatrixXd::Zero(ndocc,nbasis-ndocc);
+
+
+  TensorRank4 T(nbasis,nbasis,nbasis,nbasis);
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          T(i,a,j,b) = 0.5*t2(i,a,j,b) + t1(i,a-ndocc)*t1(j,b-ndocc);
+        }
+      }
+    }
+  }
+
+  TensorRank4 tau(nbasis,nbasis,nbasis,nbasis);
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          tau(i,a,j,b) = t2(i,a,j,b) + t1(i,a-ndocc)*t1(j,b-ndocc);
+        }
+      }
+    }
+  }
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto k = 0; k < ndocc; k++) {
+      hoo(i,k) += f(i,k);
+
+      double sum = 0.0;
+      for (auto j = 0; j < ndocc; j++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          for (auto b = ndocc; b < nbasis; b++) {
+
+            sum += (2.0*g(i,a,j,b) - g(i,b,j,a))*tau(k,a,j,b);
+          }
+        }
+      }
+      hoo(i,k) += sum;
+    }
+  }
+
+
+  for (auto c = ndocc; c < nbasis; c++) {
+    for (auto a = ndocc; a < nbasis; a++) {
+      huu(c-ndocc,a-ndocc) += f(c,a);
+
+      double sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        for (auto j = 0; j < ndocc; j++) {
+          for (auto b = ndocc; b < nbasis; b++) {
+            sum += (2.0*g(i,a,j,b) - g(j,a,i,b))*tau(i,c,j,b);
+          }
+        }
+      }
+      huu(c-ndocc,a-ndocc) += -sum;
+    }
+  }
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto a = ndocc; a < nbasis; a++) {
+      hou(i,a-ndocc) += f(i,a);
+
+      double sum = 0.0;
+      for (auto j = 0; j < ndocc; j++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          sum += (2.0*g(i,a,j,b) - g(i,b,j,a))*t1(j,b-ndocc);
+        }
+      }
+      hou(i,a-ndocc) += sum;
+    }
+  }
+
+  for (auto c = ndocc; c < nbasis; c++) {
+    for (auto k = 0; k < ndocc; k++) {
+
+      //term1
+      sigma1(k, c-ndocc) += f(c,k);
+
+      //term2
+      double sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          sum += 2.0*f(i,a)*t1(i,c-ndocc)*t1(k,a-ndocc);
+        }
+      }
+      sigma1(k, c-ndocc) += -sum;
+
+      //term3
+      sum = 0.0;
+      for (auto a = ndocc; a < nbasis; a++) {
+        sum += huu(c-ndocc,a-ndocc)*t1(k,a-ndocc);
+      }
+      sigma1(k, c-ndocc) += sum;
+
+      //term4
+      sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        sum += hoo(i,k)*t1(i,c-ndocc);
+      }
+      sigma1(k, c-ndocc) += -sum;
+
+      //term5
+      sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          sum += hou(i,a-ndocc)*(2.0*t2(i,a,k,c) - t2(k,a,i,c) + t1(k,a-ndocc)*t1(i,c-ndocc));
+        }
+      }
+      sigma1(k, c-ndocc) += sum;
+
+      //term6
+      sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          sum += (2.0*g(i,a,c,k)-g(i,k,c,a))*t1(i,a-ndocc);
+        }
+      }
+      sigma1(k, c-ndocc) += sum;
+
+      //term7
+      sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          for (auto b = ndocc; b < nbasis; b++) {
+          sum += (2.0*g(i,a,c,b)-g(i,b,c,a))*tau(i,a,k,b);
+          }
+        }
+      }
+      sigma1(k, c-ndocc) += sum;
+
+      //term8
+      sum = 0.0;
+      for (auto i = 0; i < ndocc; i++) {
+        for (auto j = 0; j < ndocc; j++) {
+          for (auto a = ndocc; a < nbasis; a++) {
+            sum += (2.0*g(i,a,j,k)-g(j,a,i,k))*tau(i,a,j,c);
+          }
+        }
+      }
+      sigma1(k, c-ndocc) += -sum;
+    }
+  }
+
+  return sigma1;
+}
+
+Eigen::MatrixXd get_sigma1_closed_shell_ta(const int ndocc, const int nbasis, Eigen::MatrixXd &f, TensorRank4 &g, Eigen::MatrixXd &t1, TensorRank4 &t2) {
+
+  Eigen::MatrixXd sigma1(nbasis,nbasis);
+  sigma1 = Eigen::MatrixXd::Zero(nbasis,nbasis);
+
+  Eigen::MatrixXd hac(nbasis-ndocc,nbasis-ndocc);
+  hac = Eigen::MatrixXd::Zero(nbasis-ndocc,nbasis-ndocc);
+
+  Eigen::MatrixXd hki(ndocc,ndocc);
+  hki = Eigen::MatrixXd::Zero(ndocc,ndocc);
+
+  Eigen::MatrixXd hkc(ndocc,nbasis-ndocc);
+  hkc = Eigen::MatrixXd::Zero(ndocc,nbasis-ndocc);
+
+
+  TensorRank4 T(nbasis,nbasis,nbasis,nbasis);
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          T(i,a,j,b) = 0.5*t2(i,a,j,b) + t1(i,a-ndocc)*t1(j,b-ndocc);
+        }
+      }
+    }
+  }
+
+  TensorRank4 tau(nbasis,nbasis,nbasis,nbasis);
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          tau(i,a,j,b) = t2(i,a,j,b) + t1(i,a-ndocc)*t1(j,b-ndocc);
+        }
+      }
+    }
+  }
+
+  for (auto a = ndocc; a < nbasis; a++) {
+    for (auto c = ndocc; c < nbasis; c++) {
+
+      double sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto l = 0; l < ndocc; l++) {
+          for (auto d = ndocc; d < nbasis; d++) {
+            sum += -(2.0*g(c,k,d,l) - g(c,l,d,k))*tau(k,a,l,d);
+          }
+        }
+      }
+
+      hac(a-ndocc,c-ndocc) = sum + f(a,c);
+    }
+  }
+
+  for (auto k = 0; k < ndocc; k++) {
+    for (auto i = 0; i < ndocc; i++) {
+      double sum = 0.0;
+      for (auto l = 0; l < ndocc; l++) {
+        for (auto c = ndocc; c < nbasis; c++) {
+          for (auto d = ndocc; d < nbasis; d++) {
+            sum += (2.0*g(c,k,d,l) - g(d,k,c,l))*tau(i,c,l,d);
+          }
+        }
+      }
+
+      hki(k,i) = f(k,i) + sum;
+    }
+  }
+
+  for (auto k = 0; k < ndocc; k++) {
+    for (auto c = ndocc; c < nbasis; c++) {
+      double sum = 0.0;
+      for (auto l = 0; l < ndocc; l++) {
+        for (auto d = ndocc; d < nbasis; d++) {
+          sum += f(c,k) + (2.0*g(c,k,d,l) - g(d,k,c,l))*t1(l,d-ndocc);
+        }
+      }
+      hkc(k,c-ndocc) = sum;
+    }
+  }
+
+  for (auto a = ndocc; a < nbasis; a++) {
+    for (auto i = 0; i < ndocc; i++) {
+
+      sigma1(i,a-ndocc) += f(a,i);
+
+      double sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto c = ndocc; c < nbasis; c++) {
+          sum += -2.0*f(c,k)*t1(i,c-ndocc)*t1(k,a-ndocc);
+        }
+      }
+      sigma1(i,a-ndocc) += sum;
+
+      sum = 0.0;
+      for (auto c = ndocc; c < nbasis; c++) {
+        sum += hac(a-ndocc,c-ndocc)*t1(i,c-ndocc);
+      }
+      sigma1(i,a-ndocc) += sum;
+
+      sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        sum += hki(k,i)*t1(k,a-ndocc);
+      }
+      sigma1(i,a-ndocc) -= sum;
+
+      sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto c = ndocc; c < nbasis; c++) {
+          sum += hkc(k,c-ndocc)*(2.0*t2(k,c,i,a) - t2(i,c,k,a) + t1(i,c-ndocc)*t1(k,a-ndocc));
+        }
+      }
+      sigma1(i,a-ndocc) += sum;
+
+      sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto c = ndocc; c < nbasis; c++) {
+          sum += (2.0*g(c,k,a,i)-g(k,i,a,c))*t1(k,c-ndocc);
+        }
+      }
+      sigma1(i,a-ndocc) += sum;
+
+      sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto c = ndocc; c < nbasis; c++) {
+          for (auto d = ndocc; d < nbasis; d++) {
+            sum += (2.0*g(k,c,a,d)-g(k,d,a,c))*tau(k,c,i,d);
+          }
+        }
+      }
+      sigma1(i,a-ndocc) += sum;
+
+      sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto l = 0; l < ndocc; l++) {
+          for (auto c = ndocc; c < nbasis; c++) {
+            sum += (2.0*g(k,c,l,i)- g(l,c,k,i))*tau(k,c,l,a);
+          }
+        }
+      }
+
+      sigma1(i,a-ndocc) -= sum;
+
+    }
+  }
+
+
+  return sigma1;
+}
+
+TensorRank4 get_sigma2_closed_shell_ta(const int ndocc, const int nbasis, Eigen::MatrixXd &f, TensorRank4 &g, Eigen::MatrixXd &t1, TensorRank4 &t2) {
+
+  TensorRank4 sigma2(nbasis,nbasis,nbasis,nbasis);
+
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          sigma2(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  TensorRank4 aa(nbasis,nbasis,nbasis,nbasis);
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          aa(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  TensorRank4 bb(nbasis,nbasis,nbasis,nbasis);
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          bb(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  TensorRank4 jj(nbasis,nbasis,nbasis,nbasis);
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          jj(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  TensorRank4 kk(nbasis,nbasis,nbasis,nbasis);
+  for (auto p = 0; p < nbasis; p++) {
+    for (auto q = 0; q < nbasis; q++) {
+      for (auto r = 0; r < nbasis; r++) {
+        for (auto s = 0; s < nbasis; s++) {
+          kk(p,q,r,s) = 0.0;
+        }
+      }
+    }
+  }
+
+  TensorRank4 T(nbasis,nbasis,nbasis,nbasis);
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          T(i,a,j,b) = 0.5*t2(i,a,j,b) + t1(i,a-ndocc)*t1(j,b-ndocc);
+        }
+      }
+    }
+  }
+
+  TensorRank4 tau(nbasis,nbasis,nbasis,nbasis);
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+          tau(i,a,j,b) = t2(i,a,j,b) + t1(i,a-ndocc)*t1(j,b-ndocc);
+        }
+      }
+    }
+  }
+
+  Eigen::MatrixXd hac(nbasis-ndocc,nbasis-ndocc);
+  hac = Eigen::MatrixXd::Zero(nbasis-ndocc,nbasis-ndocc);
+
+  Eigen::MatrixXd hki(ndocc,ndocc);
+  hki = Eigen::MatrixXd::Zero(ndocc,ndocc);
+
+  Eigen::MatrixXd gac(nbasis-ndocc,nbasis-ndocc);
+  gac = Eigen::MatrixXd::Zero(nbasis-ndocc,nbasis-ndocc);
+
+  Eigen::MatrixXd gki(ndocc,ndocc);
+  gki = Eigen::MatrixXd::Zero(ndocc,ndocc);
+
+  for (auto a = ndocc; a < nbasis; a++) {
+    for (auto c = ndocc; c < nbasis; c++) {
+
+      double sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto l = 0; l < ndocc; l++) {
+          for (auto d = ndocc; d < nbasis; d++) {
+            sum += -(2.0*g(c,k,d,l) - g(c,l,d,k))*tau(k,a,l,d);
+          }
+        }
+      }
+
+      hac(a-ndocc,c-ndocc) = sum + f(a,c);
+    }
+  }
+
+  for (auto k = 0; k < ndocc; k++) {
+    for (auto i = 0; i < ndocc; i++) {
+      double sum = 0.0;
+      for (auto l = 0; l < ndocc; l++) {
+        for (auto c = ndocc; c < nbasis; c++) {
+          for (auto d = ndocc; d < nbasis; d++) {
+            sum += (2.0*g(c,k,d,l) - g(d,k,c,l))*tau(i,c,l,d);
+          }
+        }
+      }
+
+      hki(k,i) = f(k,i) + sum;
+    }
+  }
+
+  for (auto k = 0; k < ndocc; k++) {
+    for (auto i = 0; i < ndocc; i++) {
+
+      gki(k,i) = hki(k,i);
+
+      double sum = 0.0;
+      for (auto c = ndocc; c < nbasis; c++) {
+        sum += f(c,k)*t1(i,c-ndocc);
+      }
+      gki(k,i) += sum;
+
+      sum = 0.0;
+      for (auto l = 0; l < ndocc; l++) {
+        for (auto c = ndocc; c < nbasis; c++) {
+          sum += (2.0*g(k,i,l,c) - g(l,i,k,c))*t1(l,c-ndocc);
+        }
+      }
+      gki(k,i) += sum;
+
+    }
+  }
+
+  for (auto a = ndocc; a < nbasis; a++) {
+    for (auto c = ndocc; c < nbasis; c++) {
+
+      gac(a-ndocc,c-ndocc) = hac(a-ndocc,c-ndocc);
+
+      double sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        sum += f(c,k)*t1(k,a-ndocc);
+      }
+      gac(a-ndocc,c-ndocc) -= sum;
+
+      sum = 0.0;
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto d = ndocc; d < nbasis; d++) {
+          sum += (2.0*g(a,c,k,d)-g(a,d,k,c))*t1(k,d-ndocc);
+        }
+      }
+      gac(a-ndocc,c-ndocc) += sum;
+
+    }
+  }
+
+  for (auto a = ndocc; a < nbasis; a++) {
+    for (auto c = ndocc; c < nbasis; c++) {
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto i = 0; i < ndocc; i++) {
+
+          jj(a,i,k,c) = g(a,i,k,c);
+
+          double sum = 0.0;
+          for (auto l = 0; l < ndocc; l++) {
+            sum += g(l,i,k,c)*t1(l,a-ndocc);
+          }
+          jj(a,i,k,c) -= sum;
+
+          sum = 0.0;
+          for (auto d = ndocc; d < nbasis; d++) {
+            sum += g(a,d,k,c)*t1(i,d-ndocc);
+          }
+          jj(a,i,k,c) += sum;
+
+          sum = 0.0;
+          for (auto d = ndocc; d < nbasis; d++) {
+            for (auto l = 0; l < ndocc; l++) {
+              sum += g(c,k,d,l)*T(i,d,l,a);
+            }
+          }
+          jj(a,i,k,c) -= sum;
+
+          sum = 0.0;
+          for (auto d = ndocc; d < nbasis; d++) {
+            for (auto l = 0; l < ndocc; l++) {
+              sum += 0.5*(2.0*g(c,k,d,l)-g(d,k,c,l))*t2(i,a,l,d);
+            }
+          }
+          jj(a,i,k,c) += sum;
+
+        }
+      }
+    }
+  }
+
+  for (auto a = ndocc; a < nbasis; a++) {
+    for (auto c = ndocc; c < nbasis; c++) {
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto i = 0; i < ndocc; i++) {
+
+          kk(k,i,a,c) = g(k,i,a,c);
+          double sum = 0.0;
+          for (auto l = 0; l < ndocc; l++) {
+            sum += g(k,i,l,c)*t1(l,a-ndocc);
+          }
+          kk(k,i,a,c) -= sum;
+
+          sum = 0.0;
+          for (auto d = ndocc; d < nbasis; d++) {
+            sum += g(k,d,a,c)*t1(i,d-ndocc);
+          }
+          kk(k,i,a,c) += sum;
+
+          sum = 0.0;
+          for (auto d = ndocc; d < nbasis; d++) {
+            for (auto l = 0; l < ndocc; l++) {
+              sum += g(d,k,c,l)*T(i,d,l,a);
+            }
+          }
+          kk(k,i,a,c) -= sum;
+
+        }
+      }
+    }
+  }
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto k = 0; k < ndocc; k++) {
+        for (auto l = 0; l < ndocc; l++) {
+          aa(k,i,l,j) = g(k,i,l,j);
+
+          double sum = 0.0;
+          for (auto c = ndocc; c < nbasis; c++) {
+            sum += g(k,i,l,c)*t1(j,c-ndocc) + g(k,c,l,j)*t1(i,c-ndocc);
+          }
+          aa(k,i,l,j) += sum;
+
+          sum = 0.0;
+          for (auto c = ndocc; c < nbasis; c++) {
+            for (auto d = ndocc; d < nbasis; d++) {
+              sum += g(c,k,d,l)*tau(i,c,j,d);
+            }
+          }
+          aa(k,i,l,j) += sum;
+
+        }
+      }
+    }
+  }
+
+
+  for (auto a = ndocc; a < nbasis; a++) {
+    for (auto b = ndocc; b < nbasis; b++) {
+      for (auto c = ndocc; c < nbasis; c++) {
+        for (auto d = ndocc; d < nbasis; d++) {
+
+          bb(a,c,b,d) = g(a,c,b,d);
+
+          double sum = 0.0;
+          for (auto k = 0; k < ndocc; k++) {
+            sum += g(a,c,k,d)*t1(k,b-ndocc) + g(k,c,b,d)*t1(k,a-ndocc);
+          }
+          bb(a,c,b,d) -= sum;
+
+        }
+      }
+    }
+  }
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j < ndocc; j++) {
+      for (auto a = ndocc; a < nbasis; a++) {
+        for (auto b = ndocc; b < nbasis; b++) {
+
+          sigma2(i,a,j,b) = g(a,i,b,j);
+
+          double sum = 0.0;
+          for (auto k = 0; k < ndocc; k++) {
+            for (auto l = 0; l < ndocc; l++) {
+              sum += aa(k,i,l,j)*tau(k,a,l,b);
+            }
+          }
+          sigma2(i,a,j,b) += sum;
+
+          sum = 0.0;
+          for (auto c = ndocc; c < nbasis; c++) {
+            for (auto d = ndocc; d < nbasis; d++) {
+              sum += bb(a,c,b,d)*tau(i,c,j,d);
+            }
+          }
+          sigma2(i,a,j,b) += sum;
+
+          sum = 0.0;
+          for (auto c = ndocc; c < nbasis; c++) {
+            double sum1 = 0.0;
+            for (auto k = 0; k < ndocc; k++) {
+              sum1 += g(k,i,b,c)*t1(k,a-ndocc);
+
+            }
+            sum += (g(i,a,c,b)-sum1)*t1(j,c-ndocc);
+          }
+          sigma2(i,a,j,b) += sum;
+
+          sum = 0.0;
+          for (auto c = ndocc; c < nbasis; c++) {
+            double sum1 = 0.0;
+            for (auto k = 0; k < ndocc; k++) {
+              sum1 += g(k,j,a,c)*t1(k,b-ndocc);
+            }
+            sum += (g(j,b,c,a)-sum1)*t1(i,c-ndocc);
+          }
+          sigma2(i,a,j,b) += sum;
+
+          sum = 0.0;
+          for (auto k = 0; k < ndocc; k++) {
+            double sum1 = 0.0;
+            for (auto c = ndocc; c < nbasis; c++) {
+              sum1 += g(a,i,c,k)*t1(j,c-ndocc);
+            }
+            sum += (g(i,a,j,k) + sum1)*t1(k,b-ndocc);
+          }
+          sigma2(i,a,j,b) -= sum;
+
+          sum = 0.0;
+          for (auto k = 0; k < ndocc; k++) {
+            double sum1 = 0.0;
+            for (auto c = ndocc; c < nbasis; c++) {
+              sum1 += g(b,j,c,k)*t1(i,c-ndocc);
+            }
+            sum += (g(j,b,i,k) + sum1)*t1(k,a-ndocc);
+          }
+          sigma2(i,a,j,b) -= sum;
+
+          sum = 0.0;
+          for (auto c = ndocc; c < nbasis; c++) {
+            sum += gac(a-ndocc,c-ndocc)*t2(i,c,j,b)
+                 + gac(b-ndocc,c-ndocc)*t2(j,c,i,a);
+          }
+          sigma2(i,a,j,b) += sum;
+
+          sum = 0.0;
+          for (auto k = 0; k < ndocc; k++) {
+            sum += gki(k,i)*t2(k,a,j,b)
+                 + gki(k,j)*t2(k,b,i,a);
+          }
+          sigma2(i,a,j,b) -= sum;
+
+          sum = 0.0;
+          for (auto c = ndocc; c < nbasis; c++) {
+            for (auto k = 0; k < ndocc; k++) {
+              sum += 0.5*(2.0*jj(a,i,k,c)-kk(k,i,a,c))*(2.0*t2(k,c,j,b) - t2(k,b,j,c))
+                   + 0.5*(2.0*jj(b,j,k,c)-kk(k,j,b,c))*(2.0*t2(k,c,i,a) - t2(k,a,i,c));
+            }
+          }
+          sigma2(i,a,j,b) += sum;
+
+          sum = 0.0;
+          for (auto c = ndocc; c < nbasis; c++) {
+            for (auto k = 0; k < ndocc; k++) {
+              sum += -0.5*kk(k,i,a,c)*t2(k,b,j,c) - kk(k,i,b,c)*t2(k,a,j,c)
+                     -0.5*kk(k,j,b,c)*t2(k,a,i,c) - kk(k,j,a,c)*t2(k,b,i,c);
+            }
+          }
+          sigma2(i,a,j,b) += sum;
+
+        }
+      }
+    }
+  }
+
+  return sigma2;
 }
 
 double triples_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g) {

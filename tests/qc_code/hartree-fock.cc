@@ -32,6 +32,7 @@ struct Atom {
 
 std::vector<Atom> read_geometry(const std::string& filename);
 std::vector<libint2::Shell> make_sto3g_basis(const std::vector<Atom>& atoms);
+std::vector<libint2::Shell> make_631g_basis(const std::vector<Atom>& atoms);
 std::vector<libint2::Shell> make_cc_pvdz_basis(const std::vector<Atom>& atoms);
 size_t nbasis(const std::vector<libint2::Shell>& shells);
 std::vector<size_t> map_shell_to_basis_function(const std::vector<libint2::Shell>& shells);
@@ -203,6 +204,7 @@ int main(int argc, char *argv[]) {
   /*** =========================== ***/
 
   //auto shells = make_sto3g_basis(atoms);
+  //auto shells = make_631g_basis(atoms);
   auto shells = make_cc_pvdz_basis(atoms);
 
   size_t nao = 0;
@@ -445,6 +447,47 @@ std::vector<libint2::Shell> make_sto3g_basis(const std::vector<Atom>& atoms) {
   }
 
   return shells;
+}
+
+std::vector<libint2::Shell> make_631g_basis(const std::vector<Atom>& atoms) {
+  using libint2::Shell;
+
+  std::vector<Shell> shells;
+
+  for(auto a=0; a<atoms.size(); ++a) {
+
+    // cc-pVDZ basis set
+    // obtained from https://bse.pnl.gov/bse/portal
+    switch (atoms[a].atomic_number) {
+    case 1: // Z=1: hydrogen
+      shells.push_back(
+          {
+        {18.7311370, 2.8253937, 0.6401217}, // exponents of primitive Gaussians
+        {  // contraction 0: s shell (l=0), spherical=false, contraction coefficients
+            {0, false, {0.03349460, 0.23472695, 0.81375733}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}   // origin coordinates
+          }
+      );
+      shells.push_back(
+          {
+        {0.1612778},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+
+      break;
+
+    default:
+      throw "do not know 6-31G basis for this Z";
+    }
+  }
+
+  return shells;
+
 }
 
 std::vector<libint2::Shell> make_cc_pvdz_basis(const std::vector<Atom>& atoms) {
