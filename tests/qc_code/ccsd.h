@@ -37,3 +37,7 @@ Eigen::MatrixXd get_sigma1_closed_shell_ta(const int ndocc, const int nbasis, Ei
 
 TensorRank4 get_sigma2_closed_shell_ta(const int ndocc, const int nbasis, Eigen::MatrixXd &f, TensorRank4 &g, Eigen::MatrixXd &t1, TensorRank4 &t2);
 
+double triples_energy_closed_shell(const int ndocc_so, const int nso, Eigen::MatrixXd &Fso, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g_so);
+
+double lt_triples_energy_closed_shell(const int ndocc_so, const int nso, Eigen::MatrixXd &Fso, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g_so, double E_T_can);
+

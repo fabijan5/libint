@@ -40,6 +40,7 @@ double ccsd_energy(const int nbasis, const int ndocc, Eigen::VectorXd &E_orb, Te
     }
   }
 
+  /*
   Eigen::MatrixXd Fso(nso,nso);
   Fso = Eigen::MatrixXd::Zero(nso,nso);
 
@@ -77,7 +78,7 @@ double ccsd_energy(const int nbasis, const int ndocc, Eigen::VectorXd &E_orb, Te
         }
       }
     }
-  }
+  }*/
 
   TensorRank4 t2(nbasis,nbasis,nbasis,nbasis);
 
@@ -92,15 +93,16 @@ double ccsd_energy(const int nbasis, const int ndocc, Eigen::VectorXd &E_orb, Te
     }
   }
   printf("\n");
-  printf("E_MP2_SO = %20.12f\n", E_MP2_SO);
+  //printf("E_MP2_SO = %20.12f\n", E_MP2_SO);
 
   const auto stop_total = std::chrono::high_resolution_clock::now();
   const std::chrono::duration<double> time_elapsed_total = stop_total - start_total;
-  printf("Total time for MP2 spin-orbital energy evaluation module: %10.5lf sec\n", time_elapsed_total.count());
+  //printf("Total time for MP2 spin-orbital energy evaluation module: %10.5lf sec\n", time_elapsed_total.count());
 
   //ccsd_linear_solver(ndocc_so, nso, Fso, g_so, t2_so);
   ccsd_linear_solver_closed_shell(ndocc, nbasis, F, g, t2);
 
+  double E_MP2_SO = 0.0;
   return E_MP2_SO;
 }
 
@@ -117,6 +119,9 @@ void ccsd_linear_solver(const int ndocc_so, const int nso, Eigen::MatrixXd &Fso,
 
     const auto start_it = std::chrono::high_resolution_clock::now();
     count++;
+
+    //as in paper:
+    //J.F. Stanton, J. Gauss, J.D. Watts, and R.J. Bartlett, J. Chem. Phys. volume 94, pp. 4334-4345 (1991).
 
     TensorRank4 sigma2 = get_sigma2(ndocc_so, nso, Fso, g_so, t1, t2);
 
@@ -176,6 +181,10 @@ void ccsd_linear_solver_closed_shell(const int ndocc, const int nbasis, Eigen::M
     const auto start_it = std::chrono::high_resolution_clock::now();
     count++;
 
+    //implemented as in paper:
+    //Gustavo E. Scuseria, Curtis L. Janssen, and Henry F. Schaefer III
+    //Citation: 89, 7382 (1988); doi: 10.1063/1.455269
+
     TensorRank4 sigma2 = get_sigma2_closed_shell_ta(ndocc, nbasis, F, g, t1, t2);
 
     Eigen::MatrixXd sigma1 = get_sigma1_closed_shell_ta(ndocc, nbasis, F, g, t1, t2);
@@ -206,10 +215,16 @@ void ccsd_linear_solver_closed_shell(const int ndocc, const int nbasis, Eigen::M
 
 
   printf("E_CCSD = %20.12f\n", E_CCSD);
-/*
+
   const auto start = std::chrono::high_resolution_clock::now();
 
-  double E_T = triples_energy(ndocc_so, nso, Fso, t1, t2, g_so);
+  //triples are implemented as defiend in the paper:
+  //Timothy J. Lee, Alistair P. Rendell, Peter R. Taylor
+  //J. Phys. Chem., 1990, 94 (14), pp 5463–5468
+  //and Christoph Riplinger, Barbara Sandhoefer, Andreas Hansen, and Frank Neese
+  //Citation: J. Chem. Phys. 139, 134101 (2013); doi: 10.1063/1.4821834
+
+  double E_T = triples_energy_closed_shell(ndocc, nbasis, F, t1, t2, g);
 
   const auto stop = std::chrono::high_resolution_clock::now();
   const std::chrono::duration<double> time_elapsed = stop - start;
@@ -217,7 +232,7 @@ void ccsd_linear_solver_closed_shell(const int ndocc, const int nbasis, Eigen::M
   printf("E_(T)  = %20.12f\n", E_T);
   printf("Total time for computation of (T): %10.5lf sec\n", time_elapsed.count());
 
-  double E_T_lt = lt_triples_energy(ndocc_so, nso, Fso, t1, t2, g_so, E_T);*/
+  double E_T_lt = lt_triples_energy_closed_shell(ndocc, nbasis, F, t1, t2, g, E_T);
 
 }
 
@@ -2084,6 +2099,106 @@ double triples_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eigen:
 
 }
 
+double triples_energy_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &f, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g) {
+
+  double E_T = 0.0;
+
+  TensorRank6 W(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
+  TensorRank6 V(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j <ndocc; j++) {
+      for (auto k = 0; k <ndocc; k++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          for (auto b = ndocc; b <nbasis; b++) {
+            for (auto c = ndocc; c <nbasis; c++) {
+
+
+              double sum1 = 0.0;
+              for (auto d = ndocc; d < nbasis; d++) {
+                sum1 += t2(k,c,j,d)*g(i,a,b,d)
+                       +t2(j,b,k,d)*g(i,a,c,d)
+                       +t2(j,b,i,d)*g(k,c,a,d)
+                       +t2(i,a,j,d)*g(k,c,b,d)
+                       +t2(i,a,k,d)*g(j,b,c,d)
+                       +t2(k,c,i,d)*g(j,b,a,d);
+              }
+
+
+              double sum2 = 0.0;
+              for (auto l = 0; l < ndocc; l++) {
+                sum2 += t2(i,a,l,b)*g(k,c,j,l)
+                       +t2(i,a,l,c)*g(j,b,k,l)
+                       +t2(k,c,l,a)*g(j,b,i,l)
+                       +t2(k,c,l,b)*g(i,a,j,l)
+                       +t2(j,b,l,c)*g(i,a,k,l)
+                       +t2(j,b,l,a)*g(k,c,i,l);
+              }
+              W(i,a,j,b,k,c) = sum1 - sum2;
+
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (auto i = 0; i < ndocc; i++) {
+      for (auto j = 0; j <ndocc; j++) {
+        for (auto k = 0; k <ndocc; k++) {
+          for (auto a = ndocc; a < nbasis; a++) {
+            for (auto b = ndocc; b <nbasis; b++) {
+              for (auto c = ndocc; c <nbasis; c++) {
+
+                //V(i,a,j,b,k,c) = (W(i,a,j,b,k,c) + t1(i,a-ndocc)*g(j,b,k,c)
+                   // + t1(j,b-ndocc)*g(i,a,k,c) + t1(k,c-ndocc)*g(i,a,j,b))/(1+(a == b) + (b == c));
+                V(i,a,j,b,k,c) = t1(i,a-ndocc)*g(j,b,k,c) + t1(j,b-ndocc)*g(i,a,k,c) + t1(k,c-ndocc)*g(i,a,j,b);
+
+              }
+            }
+          }
+        }
+      }
+    }
+
+  for (auto i = 0; i < ndocc; i++) {
+      for (auto j = 0; j <ndocc; j++) {
+        for (auto k = 0; k <ndocc; k++) {
+          for (auto a = ndocc; a < nbasis; a++) {
+            for (auto b = ndocc; b <nbasis; b++) {
+              for (auto c = ndocc; c <nbasis; c++) {
+                double dijkabc = f(i,i) + f(j,j) + f(k,k) - f(a,a) - f(b,b) - f(c,c);
+
+                /*double Pijk = 2 - (i == j) - (j == k);
+                double Y = V(i,a,j,b,k,c) + V(i,b,j,c,k,a) + V(i,c,j,a,k,b);
+
+                double Z = V(i,a,j,c,k,b) + V(i,b,j,a,k,c) + V(i,c,j,b,k,a);
+
+                double X = W(i,a,j,b,k,c)*V(i,a,j,b,k,c)
+                         + W(i,a,j,c,k,b)*V(i,a,j,c,k,b)
+                         + W(i,b,j,a,k,c)*V(i,b,j,a,k,c)
+                         + W(i,b,j,c,k,a)*V(i,b,j,c,k,a)
+                         + W(i,c,j,a,k,b)*V(i,c,j,a,k,b)
+                         + W(i,c,j,b,k,a)*V(i,c,j,b,k,a);
+
+                E_T += Pijk*((Y - 2.0*Z)*(W(i,a,j,b,k,c) + W(i,b,j,c,k,a) + W(i,c,j,a,k,b))
+                     + (Z - 2.0*Y)*(W(i,c,j,a,k,b) + W(i,b,j,a,k,c) + W(i,c,j,b,k,a)) + 3.0*X)/dijkabc;
+*/
+                E_T += 1/3.0*(W(i,a,j,b,k,c) + V(i,a,j,b,k,c))*(4.0*W(i,a,j,b,k,c)
+                + W(k,a,i,b,j,c) + W(j,a,k,b,i,c) - 4.0*W(k,a,j,b,i,c) - W(i,a,k,b,j,c)
+                - W(j,a,i,b,k,c))/dijkabc;
+              }
+            }
+          }
+        }
+      }
+    }
+
+  std::cout << "E_T = " << E_T << std::endl;
+
+  return E_T;
+
+}
 
 void gauss_quad(int N, double a, double b, Eigen::VectorXd &w, Eigen::VectorXd &x) {
 
@@ -2189,5 +2304,104 @@ double lt_triples_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eig
 
 }
 
+double lt_triples_energy_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &f, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g, double E_T_can) {
+
+  double E_T_lt = 0.0;
+
+  TensorRank6 W(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
+    TensorRank6 V(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
+
+    for (auto i = 0; i < ndocc; i++) {
+      for (auto j = 0; j <ndocc; j++) {
+        for (auto k = 0; k <ndocc; k++) {
+          for (auto a = ndocc; a < nbasis; a++) {
+            for (auto b = ndocc; b <nbasis; b++) {
+              for (auto c = ndocc; c <nbasis; c++) {
+
+
+                double sum1 = 0.0;
+                for (auto d = ndocc; d < nbasis; d++) {
+                  sum1 += t2(k,c,j,d)*g(i,a,b,d)
+                             +t2(j,b,k,d)*g(i,a,c,d)
+                             +t2(j,b,i,d)*g(k,c,a,d)
+                             +t2(i,a,j,d)*g(k,c,b,d)
+                             +t2(i,a,k,d)*g(j,b,c,d)
+                             +t2(k,c,i,d)*g(j,b,a,d);
+                }
+
+
+                double sum2 = 0.0;
+                for (auto l = 0; l < ndocc; l++) {
+                  sum2 += t2(i,a,l,b)*g(k,c,j,l)
+                             +t2(i,a,l,c)*g(j,b,k,l)
+                             +t2(k,c,l,a)*g(j,b,i,l)
+                             +t2(k,c,l,b)*g(i,a,j,l)
+                             +t2(j,b,l,c)*g(i,a,k,l)
+                             +t2(j,b,l,a)*g(k,c,i,l);
+                }
+                W(i,a,j,b,k,c) = sum1 - sum2;
+
+                V(i,a,j,b,k,c) = t1(i,a-ndocc)*g(j,b,k,c) + t1(j,b-ndocc)*g(i,a,k,c) + t1(k,c-ndocc)*g(i,a,j,b);
+              }
+            }
+          }
+        }
+      }
+    }
+
+  double alpha = 3.0*f(ndocc,ndocc) - 3.0*f(ndocc-1,ndocc-1);
+  std::cout << "alpha = " << alpha << std::endl;
+
+  printf(" \n");
+  printf(" Laplace-Transform CCSD(T): \n");
+  for (auto n = 1; n <= 10; n++) {
+
+    const auto start_n = std::chrono::high_resolution_clock::now();
+    Eigen::VectorXd w(n);
+    Eigen::VectorXd x(n);
+    gauss_quad(n, 0, 1, w, x);
+
+
+    double E_T = 0.0;
+    for (auto i = 0; i < ndocc; i++) {
+      for (auto j = 0; j <ndocc; j++) {
+        for (auto k = 0; k <ndocc; k++) {
+          for (auto a = ndocc; a < nbasis; a++) {
+            for (auto b = ndocc; b <nbasis; b++) {
+              for (auto c = ndocc; c <nbasis; c++) {
+                double dijkabc = f(i,i) + f(j,j) + f(k,k) - f(a,a) - f(b,b) - f(c,c);
+
+                double D = (f(a,a)+f(b,b)+f(c,c)-f(i,i)-f(j,j)-f(k,k));
+                double integral = 1/3.0*(W(i,a,j,b,k,c) + V(i,a,j,b,k,c))*(4.0*W(i,a,j,b,k,c)
+                + W(k,a,i,b,j,c) + W(j,a,k,b,i,c) - 4.0*W(k,a,j,b,i,c) - W(i,a,k,b,j,c)
+                - W(j,a,i,b,k,c));
+                double exponent = D/alpha - 1.0;
+
+                double denominator = 0.0;
+                for (auto k = 0; k < n; k++) {
+                  denominator += w(k)*pow(x(k),exponent);
+                }
+                E_T += integral*denominator;
+
+              }
+            }
+          }
+        }
+      }
+    }
+
+    E_T = -E_T/alpha;
+
+    const auto stop_n = std::chrono::high_resolution_clock::now();
+    const std::chrono::duration<double> time_elapsed_n = stop_n - start_n;
+
+    if (n == 1) {
+      printf(" Number of segments         LT_CCSD(T)     error/microHartree  time for n/sec\n");}
+    printf("         %02d       %20.12f %20.12f   %10.5lf\n", n, E_T, (E_T - E_T_can)*1e6, time_elapsed_n.count());
+  }
+
+  return E_T_lt;
+
+}
 
 
