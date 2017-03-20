@@ -232,7 +232,7 @@ void ccsd_linear_solver_closed_shell(const int ndocc, const int nbasis, Eigen::M
   printf("E_(T)  = %20.12f\n", E_T);
   printf("Total time for computation of (T): %10.5lf sec\n", time_elapsed.count());
 
-  double E_T_lt = lt_triples_energy_closed_shell(ndocc, nbasis, F, t1, t2, g, E_T);
+  //double E_T_lt = lt_triples_energy_closed_shell(ndocc, nbasis, F, t1, t2, g, E_T);
 
 }
 
@@ -2099,12 +2099,145 @@ double triples_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eigen:
 
 }
 
+void gauss_quad(int N, double a, double b, Eigen::VectorXd &w, Eigen::VectorXd &x) {
+
+  Eigen::MatrixXd J;
+  J.setZero(N,N);
+  for (auto i = 0; i < N; i++) {
+    if (i < N-1) {
+      J(i,i+1) = sqrt(1/(4-pow(i+1,-2)));
+    }
+  }
+  Eigen::MatrixXd Jfin = J+J.transpose();
+
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Jfin);
+  x = es.eigenvalues();
+  Eigen::MatrixXd V = es.eigenvectors();
+
+  for (int i = 0; i < N; i++) {
+    w(i) = 0.5*2.0*(b-a)*V(0,i)*V(0,i);
+    x(i) = (b-a)*0.5*x(i) + (b+a)*0.5;
+  }
+}
+
 double triples_energy_closed_shell(const int ndocc, const int nbasis, Eigen::MatrixXd &f, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g) {
 
   double E_T = 0.0;
 
   TensorRank6 W(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
   TensorRank6 V(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
+
+  TensorRank6 W1(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
+  TensorRank6 W2(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
+
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j <ndocc; j++) {
+      for (auto k = 0; k <ndocc; k++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          for (auto b = ndocc; b <nbasis; b++) {
+            for (auto c = ndocc; c <nbasis; c++) {
+              double sum1 = 0.0;
+              //double sum2 = 0.0;
+              for (auto d = ndocc; d < nbasis; d++) {
+                sum1 += t2(k,c,j,d)*g(i,a,b,d)
+                                           +t2(j,b,k,d)*g(i,a,c,d)
+                                           +t2(j,b,i,d)*g(k,c,a,d)
+                                           +t2(i,a,j,d)*g(k,c,b,d)
+                                           +t2(i,a,k,d)*g(j,b,c,d)
+                                           +t2(k,c,i,d)*g(j,b,a,d);
+                //sum2 += t2(k,c,j,d)*g(i,a,b,d);
+                //sum2 += t2(k,c,i,d)*g(j,b,a,d);
+              }
+
+              double sum11 = 0.0;
+              double sum2 = 0.0;
+              for (auto l = 0; l < ndocc; l++) {
+                sum11 += t2(i,a,l,b)*g(k,c,j,l)
+                                         +t2(i,a,l,c)*g(j,b,k,l)
+                                         +t2(k,c,l,a)*g(j,b,i,l)
+                                         +t2(k,c,l,b)*g(i,a,j,l)
+                                         +t2(j,b,l,c)*g(i,a,k,l)
+                                         +t2(j,b,l,a)*g(k,c,i,l);
+                sum2 += t2(i,a,l,b)*g(k,c,j,l);
+              }
+              //W1(i,a,j,b,k,c) = sum1;
+              //W2(i,a,j,b,k,c) = sum2;
+              W2(i,a,j,b,k,c) = sum1;
+              W1(i,a,j,b,k,c) = sum11;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  double Etest2 = 0.0;
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j <ndocc; j++) {
+      for (auto k = 0; k <ndocc; k++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          for (auto b = ndocc; b <nbasis; b++) {
+            for (auto c = ndocc; c <nbasis; c++) {
+              double dijkabc = f(i,i) + f(j,j) + f(k,k) - f(a,a) - f(b,b) - f(c,c);
+              /*Etest2 += Wt(i,a,j,b,k,c)*(4.0*Wt(i,a,j,b,k,c)
+              + Wt(k,a,i,b,j,c) + Wt(j,a,k,b,i,c) - 4.0*Wt(k,a,j,b,i,c) - Wt(i,a,k,b,j,c)
+              - Wt(j,a,i,b,k,c))/dijkabc;*/
+              /*Etest2 += W1(i,a,j,b,k,c)*( 4.0*W1(i,a,j,b,k,c)
+              + W1(k,a,i,b,j,c) + W1(j,a,k,b,i,c) - 2.0*W1(k,a,j,b,i,c) - 2.0*W1(i,a,k,b,j,c)
+              - 2.0*W1(j,a,i,b,k,c))/dijkabc;*/
+              Etest2 += W2(i,a,j,b,k,c)*(4.0*W1(i,a,j,b,k,c)
+              + W1(k,a,i,b,j,c) + W1(j,a,k,b,i,c) - 2.0*W1(k,a,j,b,i,c) - 2.0*W1(i,a,k,b,j,c)
+              - 2.0*W1(j,a,i,b,k,c))/dijkabc;
+            }
+          }
+        }
+      }
+    }
+  }
+  std::cout << "Etest2 = " << Etest2 << std::endl;
+
+  double alpha = 3.0*f(ndocc,ndocc) - 3.0*f(ndocc-1,ndocc-1);
+  std::cout << "alpha = " << alpha << std::endl;
+
+  printf(" \n");
+  printf(" Laplace-Transform CCSD(T): \n");
+
+  for (auto n = 1; n < 4; n++) {
+    Eigen::VectorXd w(n);
+    Eigen::VectorXd x(n);
+    gauss_quad(n, 0, 1, w, x);
+
+    double elt = 0.0;
+    for (auto m = 0; m < n; m++) {
+
+      for (auto e = ndocc; e < nbasis; e++) {
+        for (auto h = ndocc; h <nbasis; h++) {
+
+          double sum1 = 0.0;
+          double sum2 = 0.0;
+
+          for (auto i = 0; i < ndocc; i++) {
+            for (auto a = ndocc; a < nbasis; a++) {
+              for (auto b = ndocc; b <nbasis; b++) {
+                sum1 += g(i,a,b,e)*g(i,a,b,h)*pow(x(m),f(a,a)/alpha - 1/6.0)*pow(x(m),f(b,b)/alpha - 1/6.0)*pow(x(m),-f(i,i)/alpha - 1/6.0);
+              }
+            }
+          }
+
+          for (auto j = 0; j <ndocc; j++) {
+            for (auto k = 0; k <ndocc; k++) {
+              for (auto c = ndocc; c <nbasis; c++) {
+                sum2 += t2(k,c,j,e)*t2(k,c,j,h)*pow(x(m),f(c,c)/alpha - 1/6.0)*pow(x(m),-f(j,j)/alpha - 1/6.0)*pow(x(m),-f(k,k)/alpha - 1/6.0);
+              }
+            }
+          }
+
+          elt += w(m)*sum1*sum2;
+        }
+      }
+    }
+    std::cout << "elt = " << -elt/alpha << std::endl;
+  }
 
   for (auto i = 0; i < ndocc; i++) {
     for (auto j = 0; j <ndocc; j++) {
@@ -2136,6 +2269,8 @@ double triples_energy_closed_shell(const int ndocc, const int nbasis, Eigen::Mat
               }
               W(i,a,j,b,k,c) = sum1 - sum2;
 
+              V(i,a,j,b,k,c) = t1(i,a-ndocc)*g(j,b,k,c) + t1(j,b-ndocc)*g(i,a,k,c) + t1(k,c-ndocc)*g(i,a,j,b);
+
             }
           }
         }
@@ -2144,81 +2279,33 @@ double triples_energy_closed_shell(const int ndocc, const int nbasis, Eigen::Mat
   }
 
   for (auto i = 0; i < ndocc; i++) {
-      for (auto j = 0; j <ndocc; j++) {
-        for (auto k = 0; k <ndocc; k++) {
-          for (auto a = ndocc; a < nbasis; a++) {
-            for (auto b = ndocc; b <nbasis; b++) {
-              for (auto c = ndocc; c <nbasis; c++) {
+    for (auto j = 0; j <ndocc; j++) {
+      for (auto k = 0; k <ndocc; k++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          for (auto b = ndocc; b <nbasis; b++) {
+            for (auto c = ndocc; c <nbasis; c++) {
+              double dijkabc = f(i,i) + f(j,j) + f(k,k) - f(a,a) - f(b,b) - f(c,c);
+              E_T += 1/3.0*(W(i,a,j,b,k,c) + V(i,a,j,b,k,c))*(4.0*W(i,a,j,b,k,c)
+              + W(k,a,i,b,j,c) + W(j,a,k,b,i,c) - 4.0*W(k,a,j,b,i,c) - W(i,a,k,b,j,c)
+              - W(j,a,i,b,k,c))/dijkabc;
+              /*E_T += 1/3.0*(V(i,a,j,b,k,c))*(4.0*W(i,a,j,b,k,c)
+                           + W(k,a,i,b,j,c) + W(j,a,k,b,i,c) - 2.0*W(k,a,j,b,i,c) - 2.0*W(i,a,k,b,j,c)
+                           - 2.0*W(j,a,i,b,k,c))/dijkabc;*/
+              /*E_T += (V(i,a,j,b,k,c))*(4.0*W2(i,a,j,b,k,c)
+                                         + W2(k,a,i,b,j,c) + W2(j,a,k,b,i,c) - 2.0*W2(k,a,j,b,i,c) - 2.0*W2(i,a,k,b,j,c)
+                                         - 2.0*W2(j,a,i,b,k,c))/dijkabc;*/
 
-                //V(i,a,j,b,k,c) = (W(i,a,j,b,k,c) + t1(i,a-ndocc)*g(j,b,k,c)
-                   // + t1(j,b-ndocc)*g(i,a,k,c) + t1(k,c-ndocc)*g(i,a,j,b))/(1+(a == b) + (b == c));
-                V(i,a,j,b,k,c) = t1(i,a-ndocc)*g(j,b,k,c) + t1(j,b-ndocc)*g(i,a,k,c) + t1(k,c-ndocc)*g(i,a,j,b);
-
-              }
             }
           }
         }
       }
     }
-
-  for (auto i = 0; i < ndocc; i++) {
-      for (auto j = 0; j <ndocc; j++) {
-        for (auto k = 0; k <ndocc; k++) {
-          for (auto a = ndocc; a < nbasis; a++) {
-            for (auto b = ndocc; b <nbasis; b++) {
-              for (auto c = ndocc; c <nbasis; c++) {
-                double dijkabc = f(i,i) + f(j,j) + f(k,k) - f(a,a) - f(b,b) - f(c,c);
-
-                /*double Pijk = 2 - (i == j) - (j == k);
-                double Y = V(i,a,j,b,k,c) + V(i,b,j,c,k,a) + V(i,c,j,a,k,b);
-
-                double Z = V(i,a,j,c,k,b) + V(i,b,j,a,k,c) + V(i,c,j,b,k,a);
-
-                double X = W(i,a,j,b,k,c)*V(i,a,j,b,k,c)
-                         + W(i,a,j,c,k,b)*V(i,a,j,c,k,b)
-                         + W(i,b,j,a,k,c)*V(i,b,j,a,k,c)
-                         + W(i,b,j,c,k,a)*V(i,b,j,c,k,a)
-                         + W(i,c,j,a,k,b)*V(i,c,j,a,k,b)
-                         + W(i,c,j,b,k,a)*V(i,c,j,b,k,a);
-
-                E_T += Pijk*((Y - 2.0*Z)*(W(i,a,j,b,k,c) + W(i,b,j,c,k,a) + W(i,c,j,a,k,b))
-                     + (Z - 2.0*Y)*(W(i,c,j,a,k,b) + W(i,b,j,a,k,c) + W(i,c,j,b,k,a)) + 3.0*X)/dijkabc;
-*/
-                E_T += 1/3.0*(W(i,a,j,b,k,c) + V(i,a,j,b,k,c))*(4.0*W(i,a,j,b,k,c)
-                + W(k,a,i,b,j,c) + W(j,a,k,b,i,c) - 4.0*W(k,a,j,b,i,c) - W(i,a,k,b,j,c)
-                - W(j,a,i,b,k,c))/dijkabc;
-              }
-            }
-          }
-        }
-      }
-    }
+  }
 
   std::cout << "E_T = " << E_T << std::endl;
 
   return E_T;
 
-}
-
-void gauss_quad(int N, double a, double b, Eigen::VectorXd &w, Eigen::VectorXd &x) {
-
-  Eigen::MatrixXd J;
-  J.setZero(N,N);
-  for (auto i = 0; i < N; i++) {
-    if (i < N-1) {
-      J(i,i+1) = sqrt(1/(4-pow(i+1,-2)));
-    }
-  }
-  Eigen::MatrixXd Jfin = J+J.transpose();
-
-  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Jfin);
-  x = es.eigenvalues();
-  Eigen::MatrixXd V = es.eigenvectors();
-
-  for (int i = 0; i < N; i++) {
-    w(i) = 0.5*2.0*(b-a)*V(0,i)*V(0,i);
-    x(i) = (b-a)*0.5*x(i) + (b+a)*0.5;
-  }
 }
 
 double lt_triples_energy(const int ndocc, const int nso, Eigen::MatrixXd &f, Eigen::MatrixXd &t1, TensorRank4 &t2, TensorRank4 &g, double E_T_can) {
@@ -2309,45 +2396,45 @@ double lt_triples_energy_closed_shell(const int ndocc, const int nbasis, Eigen::
   double E_T_lt = 0.0;
 
   TensorRank6 W(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
-    TensorRank6 V(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
+  TensorRank6 V(nbasis, nbasis, nbasis, nbasis, nbasis, nbasis);
 
-    for (auto i = 0; i < ndocc; i++) {
-      for (auto j = 0; j <ndocc; j++) {
-        for (auto k = 0; k <ndocc; k++) {
-          for (auto a = ndocc; a < nbasis; a++) {
-            for (auto b = ndocc; b <nbasis; b++) {
-              for (auto c = ndocc; c <nbasis; c++) {
-
-
-                double sum1 = 0.0;
-                for (auto d = ndocc; d < nbasis; d++) {
-                  sum1 += t2(k,c,j,d)*g(i,a,b,d)
-                             +t2(j,b,k,d)*g(i,a,c,d)
-                             +t2(j,b,i,d)*g(k,c,a,d)
-                             +t2(i,a,j,d)*g(k,c,b,d)
-                             +t2(i,a,k,d)*g(j,b,c,d)
-                             +t2(k,c,i,d)*g(j,b,a,d);
-                }
+  for (auto i = 0; i < ndocc; i++) {
+    for (auto j = 0; j <ndocc; j++) {
+      for (auto k = 0; k <ndocc; k++) {
+        for (auto a = ndocc; a < nbasis; a++) {
+          for (auto b = ndocc; b <nbasis; b++) {
+            for (auto c = ndocc; c <nbasis; c++) {
 
 
-                double sum2 = 0.0;
-                for (auto l = 0; l < ndocc; l++) {
-                  sum2 += t2(i,a,l,b)*g(k,c,j,l)
-                             +t2(i,a,l,c)*g(j,b,k,l)
-                             +t2(k,c,l,a)*g(j,b,i,l)
-                             +t2(k,c,l,b)*g(i,a,j,l)
-                             +t2(j,b,l,c)*g(i,a,k,l)
-                             +t2(j,b,l,a)*g(k,c,i,l);
-                }
-                W(i,a,j,b,k,c) = sum1 - sum2;
-
-                V(i,a,j,b,k,c) = t1(i,a-ndocc)*g(j,b,k,c) + t1(j,b-ndocc)*g(i,a,k,c) + t1(k,c-ndocc)*g(i,a,j,b);
+              double sum1 = 0.0;
+              for (auto d = ndocc; d < nbasis; d++) {
+                sum1 += t2(k,c,j,d)*g(i,a,b,d)
+                                 +t2(j,b,k,d)*g(i,a,c,d)
+                                 +t2(j,b,i,d)*g(k,c,a,d)
+                                 +t2(i,a,j,d)*g(k,c,b,d)
+                                 +t2(i,a,k,d)*g(j,b,c,d)
+                                 +t2(k,c,i,d)*g(j,b,a,d);
               }
+
+
+              double sum2 = 0.0;
+              for (auto l = 0; l < ndocc; l++) {
+                sum2 += t2(i,a,l,b)*g(k,c,j,l)
+                                 +t2(i,a,l,c)*g(j,b,k,l)
+                                 +t2(k,c,l,a)*g(j,b,i,l)
+                                 +t2(k,c,l,b)*g(i,a,j,l)
+                                 +t2(j,b,l,c)*g(i,a,k,l)
+                                 +t2(j,b,l,a)*g(k,c,i,l);
+              }
+              W(i,a,j,b,k,c) = sum1 - sum2;
+
+              V(i,a,j,b,k,c) = t1(i,a-ndocc)*g(j,b,k,c) + t1(j,b-ndocc)*g(i,a,k,c) + t1(k,c-ndocc)*g(i,a,j,b);
             }
           }
         }
       }
     }
+  }
 
   double alpha = 3.0*f(ndocc,ndocc) - 3.0*f(ndocc-1,ndocc-1);
   std::cout << "alpha = " << alpha << std::endl;

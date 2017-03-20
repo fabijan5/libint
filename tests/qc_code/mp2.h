@@ -15,3 +15,20 @@ void lt_mp2_energy(const int nbasis,
                    Eigen::VectorXd E_orb,
                    TensorRank4 &g,
                    double E_MP2_can);
+
+void lt_ao_mp2_energy(const int nbasis,
+                      const int ndocc,
+                      Eigen::VectorXd E_orb,
+                      Eigen::MatrixXd &C,
+                      TensorRank4 &g,
+                      double E_MP2_can);
+
+void gf2(const int nbasis,
+                  const int ndocc,
+                  Eigen::VectorXd &E_orb,
+                  TensorRank4 &g);
+
+void gf2_test(const int nbasis,
+              const int ndocc,
+              Eigen::VectorXd &E_orb,
+              TensorRank4 &g);

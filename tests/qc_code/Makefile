@@ -28,7 +28,7 @@ check:: check1
 check1::
 
 check1:: $(TEST1)
-	./$^ $(SRCDIR)/h2o.xyz 
+	./$^ $(SRCDIR)/hf.xyz 
 
 mp2.o: mp2.cc
 	g++ -c -I /usr/local/include/eigen3 $^ -std=c++11

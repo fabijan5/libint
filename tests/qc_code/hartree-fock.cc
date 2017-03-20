@@ -34,6 +34,7 @@ std::vector<Atom> read_geometry(const std::string& filename);
 std::vector<libint2::Shell> make_sto3g_basis(const std::vector<Atom>& atoms);
 std::vector<libint2::Shell> make_631g_basis(const std::vector<Atom>& atoms);
 std::vector<libint2::Shell> make_cc_pvdz_basis(const std::vector<Atom>& atoms);
+std::vector<libint2::Shell> make_cc_pvtz_basis(const std::vector<Atom>& atoms);
 size_t nbasis(const std::vector<libint2::Shell>& shells);
 std::vector<size_t> map_shell_to_basis_function(const std::vector<libint2::Shell>& shells);
 Matrix compute_1body_ints(const std::vector<libint2::Shell>& shells,
@@ -205,7 +206,8 @@ int main(int argc, char *argv[]) {
 
   //auto shells = make_sto3g_basis(atoms);
   //auto shells = make_631g_basis(atoms);
-  auto shells = make_cc_pvdz_basis(atoms);
+  //auto shells = make_cc_pvdz_basis(atoms);
+  auto shells = make_cc_pvtz_basis(atoms);
 
   size_t nao = 0;
   for (auto s=0; s<shells.size(); ++s)
@@ -244,9 +246,15 @@ int main(int argc, char *argv[]) {
 
   double E_MP2 = mp2_energy(nao, ndocc, E_orb, g_mo);
 
-  lt_mp2_energy(nao, ndocc, E_orb, g_mo, E_MP2);
+  gf2(nao, ndocc, E_orb, g_mo);
 
-  double E_CCSD = ccsd_energy(nao, ndocc, E_orb, g_mo);
+  //gf2_test(nao, ndocc, E_orb, g_mo);
+
+  //lt_mp2_energy(nao, ndocc, E_orb, g_mo, E_MP2);
+
+  //lt_ao_mp2_energy(nao, ndocc, E_orb, C, g, E_MP2);
+
+  //double E_CCSD = ccsd_energy(nao, ndocc, E_orb, g_mo);
 
 return 0;
 }
@@ -707,6 +715,303 @@ std::vector<libint2::Shell> make_cc_pvdz_basis(const std::vector<Atom>& atoms) {
 
     default:
       throw "do not know cc-pVDZ basis for this Z";
+    }
+  }
+
+  return shells;
+
+}
+
+std::vector<libint2::Shell> make_cc_pvtz_basis(const std::vector<Atom>& atoms) {
+  using libint2::Shell;
+
+  std::vector<Shell> shells;
+
+  for(auto a=0; a<atoms.size(); ++a) {
+
+    // cc-pVTZ basis set
+    // obtained from https://bse.pnl.gov/bse/portal
+    switch (atoms[a].atomic_number) {
+    case 1: // Z=1: hydrogen
+      shells.push_back(
+          {
+        {33.8700000, 5.0950000, 1.1590000}, // exponents of primitive Gaussians
+        {  // contraction 0: s shell (l=0), spherical=false, contraction coefficients
+            {0, false, {0.02549486323, 0.1903627659, 0.8521620222}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}   // origin coordinates
+          }
+      );
+      shells.push_back(
+          {
+        {0.3258000},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.1027000},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {1.4070000},
+        {
+            {1, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.3880000},
+        {
+            {1, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {1.0570000},
+        {
+            {2, true, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+
+      break;
+
+    case 8: // Z=8: oxygen
+      shells.push_back(
+          {
+        {15330,
+          2299,
+          522.4,
+          147.3,
+          47.55,
+          16.76,
+          6.207,
+          0.6882}, // exponents of primitive Gaussians
+        {  // contraction 0: s shell (l=0), spherical=false, contraction coefficients
+            {0, false, {0.000508,
+                0.003929,
+                0.020243,
+                0.079181,
+                0.230687,
+                0.433118,
+                0.35026,
+                -0.008154}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}   // origin coordinates
+          }
+      );
+      shells.push_back(
+          {
+        {15330,
+          2299,
+          522.4,
+          147.3,
+          47.55,
+          16.76,
+          6.207,
+          0.6882},
+        {
+            {0, false, {-0.000115,
+                -0.000895,
+                -0.004636,
+                -0.018724,
+                -0.058463,
+                -0.136463,
+                -0.17574,
+                0.603418}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {1.752},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.2384},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {34.46,
+          7.749,
+          2.28},
+        {
+            {1, false, {0.015928,
+                0.09974,
+                0.310492}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.7156},
+        {
+            {1, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.214},
+        {
+            {1, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {2.314},
+        {
+            {2, true, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.645},
+        {
+            {2, true, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {1.428},
+        {
+            {3, true, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+
+      break;
+
+    case 9: // Z=9: fluorine
+      shells.push_back(
+          {
+        {19500.0000000, 2923.0000000, 664.5000000, 187.5000000, 60.6200000, 21.4200000, 7.9500000}, // exponents of primitive Gaussians
+        {  // contraction 0: s shell (l=0), spherical=false, contraction coefficients
+            {0, false, {0.0005190024441, 0.004015781354, 0.02067746110, 0.08086901703, 0.2358075463, 0.4425823060, 0.3569628672}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}   // origin coordinates
+          }
+      );
+      shells.push_back(
+          {
+        {664.5000000, 187.5000000, 60.6200000, 21.4200000, 7.9500000, 0.8815000},
+        {
+            {0, false, {-0.00003735980873, -0.001277472297, -0.01082201399, -0.07004820894, -0.1697466078, 1.073026608}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {2.2570000},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.3041000},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {43.8800000, 9.9260000, 2.9300000},
+        {
+            {1, false, {0.04190462069, 0.2626978417, 0.7977593735}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.9132000},
+        {
+            {1, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.2672000},
+        {
+            {1, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {3.1070000},
+        {
+            {2, true, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.8550000},
+        {
+            {2, true, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {1.9170000},
+        {
+            {3, true, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+
+      break;
+
+    default:
+      throw "do not know cc-pVTZ basis for this Z";
     }
   }
 
