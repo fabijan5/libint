@@ -20,6 +20,8 @@
 //include ccsd specific header file
 #include "ccsd.h"
 
+#include "xcfun.h"
+
 typedef Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>
         Matrix;  // import dense, dynamically sized Matrix type from Eigen;
                  // this is a matrix with row-major storage (http://en.wikipedia.org/wiki/Row-major_order)
@@ -33,6 +35,7 @@ struct Atom {
 std::vector<Atom> read_geometry(const std::string& filename);
 std::vector<libint2::Shell> make_sto3g_basis(const std::vector<Atom>& atoms);
 std::vector<libint2::Shell> make_631g_basis(const std::vector<Atom>& atoms);
+std::vector<libint2::Shell> make_6311g_basis(const std::vector<Atom>& atoms);
 std::vector<libint2::Shell> make_cc_pvdz_basis(const std::vector<Atom>& atoms);
 std::vector<libint2::Shell> make_cc_pvtz_basis(const std::vector<Atom>& atoms);
 size_t nbasis(const std::vector<libint2::Shell>& shells);
@@ -73,6 +76,10 @@ Eigen::MatrixXd fock_build(const int nbasis, Eigen::MatrixXd &P, const Eigen::Ma
     }
   }
 
+  std::cout << "P" << std::endl;
+    std::cout << P << std::endl;
+  std::cout << "F" << std::endl;
+  std::cout << F << std::endl;
   return F;
 }
 
@@ -127,13 +134,13 @@ Eigen::MatrixXd hartree_fock(const double enuc, const int nbasis, const int ndoc
   double threshold = 1e-08;
   double E_electronic;
   int count = 0;
-
+  Eigen::MatrixXd F(nbasis, nbasis);
+  Eigen::MatrixXd P;
   printf(" Hartree-Fock Energy\n");
   while (norm > threshold) {
 
     const auto start_it = std::chrono::high_resolution_clock::now();
     count++;
-    Eigen::MatrixXd F(nbasis, nbasis);
     F = fock_build(nbasis, P_guess, H_core, g);
 
     Eigen::MatrixXd Ft = X.transpose()*F*X;
@@ -145,7 +152,8 @@ Eigen::MatrixXd hartree_fock(const double enuc, const int nbasis, const int ndoc
     C = X*Ct;
     Eigen::MatrixXd C_occ = occupied_slice_of_MO_coeff(nbasis,ndocc,C);
 
-    Eigen::MatrixXd P = C_occ*C_occ.transpose();
+    P = C_occ*C_occ.transpose();
+
     norm = norm_P(P,P_guess);
     P_guess = 0.2*P_guess+0.8*P;
     E_electronic = compute_energy(nbasis, P, H_core, F);
@@ -204,10 +212,11 @@ int main(int argc, char *argv[]) {
   /*** create basis set            ***/
   /*** =========================== ***/
 
-  //auto shells = make_sto3g_basis(atoms);
+  auto shells = make_sto3g_basis(atoms);
   //auto shells = make_631g_basis(atoms);
+  //auto shells = make_6311g_basis(atoms);
   //auto shells = make_cc_pvdz_basis(atoms);
-  auto shells = make_cc_pvtz_basis(atoms);
+  //auto shells = make_cc_pvtz_basis(atoms);
 
   size_t nao = 0;
   for (auto s=0; s<shells.size(); ++s)
@@ -222,13 +231,16 @@ int main(int argc, char *argv[]) {
 
   // compute overlap integrals
   auto S = compute_1body_ints(shells, Operator::overlap);
-
+  std::cout << "S" << std::endl;
+  std::cout << S << std::endl;
   // compute kinetic-energy integrals
   auto T = compute_1body_ints(shells, Operator::kinetic);
-
+  std::cout << "T" << std::endl;
+  std::cout << T << std::endl;
   // compute nuclear-attraction integrals
   Matrix V = compute_1body_ints(shells, Operator::nuclear, atoms);
-
+  std::cout << "V" << std::endl;
+  std::cout << V << std::endl;
   // Core Hamiltonian = T + V
   Matrix H_core = T + V;
 
@@ -236,11 +248,48 @@ int main(int argc, char *argv[]) {
   T.resize(0,0);
   V.resize(0,0);
 
+  std::cout << "start" << std::endl;
   TensorRank4 g = compute_2body_ints(shells);
+  for (int i = 0; i < nao; i++) {
+    for (int j = 0; j < nao; j++) {
+       for (int k = 0; k < nao; k++) {
+         for (int l = 0; l < nao; l++) {
+           std::cout << g(i,j,k,l) << std::endl;
+         }
+       }
+    }
+  }
   Eigen::VectorXd E_orb;
 
 
   Eigen::MatrixXd C = hartree_fock(enuc, nao, ndocc, S, H_core, g, E_orb);
+
+  //start xcfun
+  xc_functional fun = xc_new_functional();
+
+  double d_elements[8] = {1, 2.1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6};
+
+  int nout,i;
+
+  xc_set(fun,"lda",1.0);
+
+  xc_eval_setup(fun,
+      XC_A_B_AX_AY_AZ_BX_BY_BZ,
+      XC_PARTIAL_DERIVATIVES,
+      1);
+
+  nout = xc_output_length(fun);
+
+  std::vector<double> output(nout);
+
+  xc_eval(fun,d_elements,output.data());
+
+  for (i=0;i<nout;i++)
+    printf("%.8e\n",output[i]);
+
+  xc_free_functional(fun);
+  //end exfun
+
 
   TensorRank4 g_mo = ao_to_mo_integral_transform(nao, ndocc, C, g);
 
@@ -493,6 +542,153 @@ std::vector<libint2::Shell> make_631g_basis(const std::vector<Atom>& atoms) {
       throw "do not know 6-31G basis for this Z";
     }
   }
+
+  return shells;
+
+}
+
+std::vector<libint2::Shell> make_6311g_basis(const std::vector<Atom>& atoms) {
+  using libint2::Shell;
+
+  std::vector<Shell> shells;
+
+  for(auto a=0; a<atoms.size(); ++a) {
+
+    // 6-311G basis set
+    // obtained from https://bse.pnl.gov/bse/portal
+    switch (atoms[a].atomic_number) {
+    case 1: // Z=1: hydrogen
+      shells.push_back(
+          {
+        {33.8650000, 5.0947900, 1.1587900}, // exponents of primitive Gaussians
+        {  // contraction 0: s shell (l=0), spherical=false, contraction coefficients
+            {0, false, {0.0254938, 0.1903730, 0.8521610 }}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}   // origin coordinates
+          }
+      );
+      shells.push_back(
+          {
+        {0.3258400},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.1027410},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.0360000},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+
+      break;
+
+
+    case 9: // Z=9: fluorine
+      shells.push_back(
+          {
+        {11427.1000000,1722.3500000,395.7460000,115.1390000,33.6026000,4.9190100}, // exponents of primitive Gaussians
+        {  // contraction 0: s shell (l=0), spherical=false, contraction coefficients
+            {0, false, {0.00180093,0.0137419,0.0681334,0.2333250,0.5890860,0.2995050}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}   // origin coordinates
+          }
+      );
+      shells.push_back(
+          {
+        {55.4441000,12.6323000,3.7175600},
+        {
+            {0, false, {0.1145360,0.9205120,-0.00337804}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {1.1654500},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.3218920},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.1076000},
+        {
+            {0, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {55.4441000,12.6323000,3.7175600},
+        {
+            {1, false, {0.0354609, 0.2374510, 0.8204580}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {1.1654500},
+        {
+            {1, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.3218920},
+        {
+            {1, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+      shells.push_back(
+          {
+        {0.1076000},
+        {
+            {1, false, {1.0000000}}
+        },
+        {{atoms[a].x, atoms[a].y, atoms[a].z}}
+          }
+      );
+
+
+      break;
+
+    default:
+      throw "do not know cc-pVDZ basis for this Z";
+    }
+  }
+
 
   return shells;
 
@@ -1168,6 +1364,7 @@ TensorRank4 compute_2body_ints(const std::vector<libint2::Shell>& shells) {
                 const auto bf3 = f3 + bf3_first;
                 for(auto f4=0; f4!=n4; ++f4, ++f1234) {
                   const auto bf4 = f4 + bf4_first;
+                  //std::cout << buf_1234[f1234] << std::endl;
                   g(bf1,bf2,bf3,bf4) = buf_1234[f1234];
                 }
               }

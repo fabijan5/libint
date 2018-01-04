@@ -6,11 +6,11 @@ endif
 -include $(TOPDIR)/src/lib/libint/MakeVars.features
 
 # include headers the object include directory
-CPPFLAGS += -I$(TOPDIR)/include -I$(TOPDIR)/include/libint2 -I$(SRCDIR)/$(TOPDIR)/src/lib/libint -DSRCDATADIR=\"$(SRCDIR)/$(TOPDIR)/lib/basis\" 
+CPPFLAGS += -I$(TOPDIR)/include -I$(TOPDIR)/include/libint2 -I$(SRCDIR)/$(TOPDIR)/src/lib/libint -DSRCDATADIR=\"$(SRCDIR)/$(TOPDIR)/lib/basis\" -I/Users/fabijanpavosevic/research/calculations/test-orca/lda/xcfun/include
 
 COMPILER_LIB = $(TOPDIR)/src/bin/libint/libINT.a
-COMPUTE_LIB = -lint2
-vpath %.a $(TOPDIR)/lib:$(TOPDIR)/lib/.libs
+COMPUTE_LIB = -lint2 -lxcfun 
+vpath %.a $(TOPDIR)/lib:$(TOPDIR)/lib/.libs /Users/fabijanpavosevic/research/calculations/test-orca/lda/xcfun/lib
 
 OBJSUF = o
 DEPSUF = d
@@ -28,7 +28,7 @@ check:: check1
 check1::
 
 check1:: $(TEST1)
-	./$^ $(SRCDIR)/hf.xyz 
+	./$^ $(SRCDIR)/h2o.xyz 
 
 mp2.o: mp2.cc
 	g++ -c -I /usr/local/include/eigen3 $^ -std=c++11
